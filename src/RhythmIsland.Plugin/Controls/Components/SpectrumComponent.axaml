@@ -1,0 +1,23 @@
+<controls:ComponentBase x:TypeArguments="models:SpectrumComponentSettings"
+                        x:Class="RhythmIsland.Controls.Components.SpectrumComponent"
+                        xmlns="https://github.com/avaloniaui"
+                        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+                        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+                        xmlns:controls="clr-namespace:ClassIsland.Core.Abstractions.Controls;assembly=ClassIsland.Core"
+                        xmlns:local="clr-namespace:RhythmIsland.Controls.Components"
+                        xmlns:models="clr-namespace:RhythmIsland.Models"
+                        mc:Ignorable="d"
+                        d:DesignWidth="300"
+                        d:DesignHeight="64"
+                        ClipToBounds="True">
+    <local:SpectrumBarsControl x:Name="BarsControl"
+                               Width="{Binding Settings.Width, RelativeSource={RelativeSource FindAncestor, AncestorType=local:SpectrumComponent}}"
+                               MinWidth="0"
+                               MinHeight="32"
+                               HorizontalAlignment="Stretch"
+                               VerticalAlignment="Stretch"
+                               IsHitTestVisible="False"
+                               ClipToBounds="True"
+                               BarBrush="{Binding Foreground, RelativeSource={RelativeSource FindAncestor, AncestorType=local:SpectrumComponent}}" />
+</controls:ComponentBase>

@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <CreateCipx>true</CreateCipx>
+    <AssemblyName>RhythmIsland</AssemblyName>
+    <RootNamespace>RhythmIsland</RootNamespace>
+    <Version>0.1.0.0</Version>
+    <FileVersion>0.1.0.0</FileVersion>
+    <PackageLicenseExpression>GPL-3.0-or-later</PackageLicenseExpression>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ClassIsland.PluginSdk" Version="2.1.0.1" ExcludeAssets="runtime;native" />
+    <PackageReference Include="NAudio" Version="2.3.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="manifest.yml" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="README.md" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\LICENSE" Link="LICENSE" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="icon.png" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="RhythmIsland.Tests" />
+  </ItemGroup>
+
+  <Target Name="CopyCipxToRepositoryRoot" AfterTargets="CreateCipx" Condition="'$(CreateCipx)' == 'true'">
+    <MakeDir Directories="$(MSBuildProjectDirectory)\..\..\cipx" />
+    <Copy SourceFiles="$(MSBuildProjectDirectory)\cipx\RhythmIsland.cipx"
+          DestinationFiles="$(MSBuildProjectDirectory)\..\..\cipx\RhythmIsland.cipx" />
+    <Copy SourceFiles="$(MSBuildProjectDirectory)\cipx\checksums.md"
+          DestinationFiles="$(MSBuildProjectDirectory)\..\..\cipx\checksums.md"
+          Condition="Exists('$(MSBuildProjectDirectory)\cipx\checksums.md')" />
+  </Target>
+</Project>

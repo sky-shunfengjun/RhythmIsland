@@ -1,0 +1,4 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!-- 独立主题骨架：当前不覆盖任何宿主样式或模板。 -->
+</Styles>

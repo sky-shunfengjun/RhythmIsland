@@ -1,0 +1,31 @@
+bin/
+obj/
+cipx/
+.vs/
+.vscode/
+.idea/
+TestResults/
+coverage/
+artifacts/
+*.user
+*.suo
+*.log
+*.tmp
+*.bak
+
+# Local AI collaboration files
+AGENTS.md
+CLAUDE.md
+.agents/
+.codex/
+.claude/
+.cursor/
+.windsurf/
+.github/copilot-instructions.md
+
+# Internal development plans and scratch notes
+docs/roadmap.md
+docs/plans/
+PLAN.md
+PLANS.md
+TODO.md
