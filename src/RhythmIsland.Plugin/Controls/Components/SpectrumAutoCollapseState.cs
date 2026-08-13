@@ -22,7 +22,7 @@ internal sealed class SpectrumAutoCollapseState
 
         var isAudible = frame is not null
                         && !frame.IsSilent
-                        && frame.Peak >= SpectrumAnalyzer.SilenceFloor
+                        && SpectrumBandResampler.HasVisibleSignal(frame.Bands, settings.Amplitude)
                         && now - frame.GeneratedAt <= AudibleFrameFreshness;
         if (isAudible)
         {

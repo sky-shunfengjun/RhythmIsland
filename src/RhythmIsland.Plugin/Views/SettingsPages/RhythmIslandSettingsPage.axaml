@@ -9,22 +9,32 @@
     mc:Ignorable="d">
     <ScrollViewer>
         <StackPanel Classes="settings-container animated-intro" Spacing="4">
-            <TextBlock Text="阶段 2 诊断"
+            <TextBlock Text="运行与诊断"
                        FontSize="20"
                        FontWeight="SemiBold" />
             <TextBlock Margin="0,0,0,8"
                        Opacity="0.72"
                        TextWrapping="Wrap"
-                       Text="当前版本用于确认默认扬声器捕获和频谱分析是否正常，尚不会在主界面绘制频谱。" />
+                       Text="管理默认扬声器捕获，并查看主界面频谱组件的运行状态。" />
             <Separator Margin="0,4" />
 
             <fa:SettingsExpander IconSource="{ci:FluentIconSource &#xE768;}"
                                  Header="运行状态"
-                                 Description="插件默认关闭；只有你主动开启后才会读取系统正在播放的声音。">
+                                 Description="开启后会读取默认扬声器正在播放的声音。">
                 <fa:SettingsExpander.Footer>
                     <ToggleSwitch OnContent="已开启"
                                   OffContent="已关闭"
                                   IsChecked="{Binding Settings.IsEnabled, Mode=TwoWay}" />
+                </fa:SettingsExpander.Footer>
+            </fa:SettingsExpander>
+
+            <fa:SettingsExpander IconSource="{ci:FluentIconSource &#xE0B5;}"
+                                 Header="重启捕获"
+                                 Description="{Binding RestartCaptureMessage}">
+                <fa:SettingsExpander.Footer>
+                    <Button Content="立即重启"
+                            IsEnabled="{Binding Settings.IsEnabled}"
+                            Command="{Binding RestartCaptureCommand}" />
                 </fa:SettingsExpander.Footer>
             </fa:SettingsExpander>
 

@@ -9,17 +9,16 @@ namespace RhythmIsland.Services;
 
 public sealed class WindowsAudioCaptureService : IAudioCaptureService, IMMNotificationClient
 {
-    private static readonly TimeSpan[] RetryDelays =
-        [TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(10)];
     private readonly ILogger<WindowsAudioCaptureService> _logger;
     private readonly SemaphoreSlim _lifecycleGate = new(1, 1);
+    private readonly CaptureFaultLatch _captureFault = new();
     private MMDeviceEnumerator? _enumerator;
     private MMDevice? _device;
     private WasapiLoopbackCapture? _capture;
     private CancellationTokenSource? _runCancellation;
-    private Task? _restartTask;
-    private int _retryIndex;
-    private bool _stopping;
+    private SingleFlightReconnectCoordinator? _reconnectCoordinator;
+    private string? _currentDeviceId;
+    private volatile bool _stopping;
 
     public WindowsAudioCaptureService(ILogger<WindowsAudioCaptureService> logger) => _logger = logger;
 
@@ -35,13 +34,15 @@ public sealed class WindowsAudioCaptureService : IAudioCaptureService, IMMNotifi
         {
             if (_runCancellation is not null) return;
             _stopping = false;
-            _retryIndex = 0;
             cancellationToken.ThrowIfCancellationRequested();
             _runCancellation = new CancellationTokenSource();
+            _reconnectCoordinator = new SingleFlightReconnectCoordinator(
+                RestartCaptureAsync,
+                _runCancellation.Token);
             _enumerator = new MMDeviceEnumerator();
             _enumerator.RegisterEndpointNotificationCallback(this);
             SetState(RuntimeState.Starting);
-            await StartCaptureCoreAsync(_runCancellation.Token, scheduleOnFailure: true);
+            if (!StartCaptureCore(_runCancellation.Token)) ScheduleRestart();
         }
         finally { _lifecycleGate.Release(); }
     }
@@ -49,12 +50,15 @@ public sealed class WindowsAudioCaptureService : IAudioCaptureService, IMMNotifi
     public async Task StopAsync(CancellationToken cancellationToken = default)
     {
         CancellationTokenSource? runCancellation;
-        await _lifecycleGate.WaitAsync(cancellationToken);
+        SingleFlightReconnectCoordinator? reconnectCoordinator;
+        _stopping = true;
+        await _lifecycleGate.WaitAsync(CancellationToken.None);
         try
         {
-            _stopping = true;
             runCancellation = _runCancellation;
             _runCancellation = null;
+            reconnectCoordinator = _reconnectCoordinator;
+            _reconnectCoordinator = null;
             runCancellation?.Cancel();
             DisposeCapture();
             if (_enumerator is not null)
@@ -68,43 +72,46 @@ public sealed class WindowsAudioCaptureService : IAudioCaptureService, IMMNotifi
         }
         finally { _lifecycleGate.Release(); }
 
-        if (_restartTask is not null)
+        if (reconnectCoordinator is not null)
         {
-            try { await _restartTask.WaitAsync(TimeSpan.FromSeconds(2), cancellationToken); }
+            try { await reconnectCoordinator.Completion.WaitAsync(TimeSpan.FromSeconds(2), CancellationToken.None); }
             catch (OperationCanceledException) { }
             catch (TimeoutException) { }
         }
         runCancellation?.Dispose();
     }
 
-    private Task StartCaptureCoreAsync(CancellationToken cancellationToken, bool scheduleOnFailure)
+    private bool StartCaptureCore(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         DisposeCapture();
         try
         {
             _device = _enumerator!.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
+            Volatile.Write(ref _currentDeviceId, _device.ID);
             DeviceName = _device.FriendlyName;
             var capture = new WasapiLoopbackCapture(_device);
             capture.DataAvailable += OnDataAvailable;
             capture.RecordingStopped += OnRecordingStopped;
             _capture = capture;
             capture.StartRecording();
-            _retryIndex = 0;
+            _captureFault.Reset();
             SetState(RuntimeState.Running, DeviceName);
+            _logger.LogInformation("默认扬声器回环捕获已启动：{DeviceName}", DeviceName);
+            return true;
         }
         catch (Exception exception)
         {
             _logger.LogWarning(exception, "无法启动默认扬声器回环捕获。");
             DisposeCapture();
             SetState(RuntimeState.DeviceUnavailable, null, exception);
-            if (scheduleOnFailure) ScheduleRestart();
+            return false;
         }
-        return Task.CompletedTask;
     }
 
     private void OnDataAvailable(object? sender, WaveInEventArgs eventArgs)
     {
+        if (_captureFault.IsFaulted) return;
         try
         {
             var capture = _capture;
@@ -114,8 +121,10 @@ public sealed class WindowsAudioCaptureService : IAudioCaptureService, IMMNotifi
         }
         catch (Exception exception)
         {
+            if (!_captureFault.TryEnterFault()) return;
             _logger.LogError(exception, "转换扬声器音频数据失败。");
             SetState(RuntimeState.Faulted, DeviceName, exception);
+            ScheduleRestart();
         }
     }
 
@@ -129,31 +138,20 @@ public sealed class WindowsAudioCaptureService : IAudioCaptureService, IMMNotifi
 
     private void ScheduleRestart(TimeSpan? debounce = null)
     {
-        var cancellation = _runCancellation;
-        if (_stopping || cancellation is null || cancellation.IsCancellationRequested) return;
-        if (_restartTask is { IsCompleted: false }) return;
-        _restartTask = Task.Run(async () =>
+        if (_stopping) return;
+        _reconnectCoordinator?.Request(debounce);
+    }
+
+    private async Task<bool> RestartCaptureAsync(CancellationToken cancellationToken)
+    {
+        await _lifecycleGate.WaitAsync(cancellationToken);
+        try
         {
-            try
-            {
-                var firstDelay = debounce;
-                while (!_stopping && ReferenceEquals(cancellation, _runCancellation))
-                {
-                    var delay = firstDelay ?? RetryDelays[Math.Min(_retryIndex++, RetryDelays.Length - 1)];
-                    firstDelay = null;
-                    await Task.Delay(delay, cancellation.Token);
-                    await _lifecycleGate.WaitAsync(cancellation.Token);
-                    try
-                    {
-                        SetState(RuntimeState.Starting);
-                        await StartCaptureCoreAsync(cancellation.Token, scheduleOnFailure: false);
-                        if (State == RuntimeState.Running) return;
-                    }
-                    finally { _lifecycleGate.Release(); }
-                }
-            }
-            catch (OperationCanceledException) { }
-        }, cancellation.Token);
+            if (_stopping || _runCancellation is null || cancellationToken != _runCancellation.Token) return true;
+            SetState(RuntimeState.Starting);
+            return StartCaptureCore(cancellationToken);
+        }
+        finally { _lifecycleGate.Release(); }
     }
 
     private void DisposeCapture()
@@ -169,6 +167,7 @@ public sealed class WindowsAudioCaptureService : IAudioCaptureService, IMMNotifi
         }
         _device?.Dispose();
         _device = null;
+        Volatile.Write(ref _currentDeviceId, null);
     }
 
     private void SetState(RuntimeState state, string? deviceName = null, Exception? error = null)
@@ -184,11 +183,12 @@ public sealed class WindowsAudioCaptureService : IAudioCaptureService, IMMNotifi
     }
     public void OnDeviceRemoved(string deviceId)
     {
-        if (_device?.ID == deviceId) ScheduleRestart(TimeSpan.FromMilliseconds(250));
+        if (Volatile.Read(ref _currentDeviceId) == deviceId) ScheduleRestart(TimeSpan.FromMilliseconds(250));
     }
     public void OnDeviceStateChanged(string deviceId, DeviceState newState)
     {
-        if (_device?.ID == deviceId && newState != DeviceState.Active) ScheduleRestart(TimeSpan.FromMilliseconds(250));
+        if (Volatile.Read(ref _currentDeviceId) == deviceId && newState != DeviceState.Active)
+            ScheduleRestart(TimeSpan.FromMilliseconds(250));
     }
     public void OnDeviceAdded(string pwstrDeviceId) { }
     public void OnPropertyValueChanged(string pwstrDeviceId, PropertyKey key) { }

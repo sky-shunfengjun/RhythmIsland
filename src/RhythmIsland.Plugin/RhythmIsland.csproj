@@ -1,10 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net8.0-windows</TargetFramework>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <EnableDynamicLoading>true</EnableDynamicLoading>
-    <CreateCipx>true</CreateCipx>
+    <CreateCipx Condition="'$(Configuration)' == 'Release'">true</CreateCipx>
+    <CreateCipx Condition="'$(Configuration)' != 'Release'">false</CreateCipx>
     <AssemblyName>RhythmIsland</AssemblyName>
     <RootNamespace>RhythmIsland</RootNamespace>
     <Version>0.1.0.0</Version>
@@ -28,7 +29,8 @@
     <InternalsVisibleTo Include="RhythmIsland.Tests" />
   </ItemGroup>
 
-  <Target Name="CopyCipxToRepositoryRoot" AfterTargets="CreateCipx" Condition="'$(CreateCipx)' == 'true'">
+  <Target Name="CopyCipxToRepositoryRoot" AfterTargets="CreateCipx"
+          Condition="'$(Configuration)' == 'Release' and '$(CreateCipx)' == 'true'">
     <MakeDir Directories="$(MSBuildProjectDirectory)\..\..\cipx" />
     <Copy SourceFiles="$(MSBuildProjectDirectory)\cipx\RhythmIsland.cipx"
           DestinationFiles="$(MSBuildProjectDirectory)\..\..\cipx\RhythmIsland.cipx" />

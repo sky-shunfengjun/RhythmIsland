@@ -13,7 +13,6 @@ public sealed class SettingsTests : IDisposable
     {
         var settings = new RhythmIslandSettings();
         Assert.False(settings.IsEnabled);
-        Assert.Equal(30, settings.FrameRate);
         Assert.Equal(1.0, settings.Sensitivity);
         Assert.Equal(0.65, settings.Smoothing);
     }
@@ -23,11 +22,9 @@ public sealed class SettingsTests : IDisposable
     {
         var settings = new RhythmIslandSettings
         {
-            FrameRate = 144,
             Sensitivity = double.NaN,
             Smoothing = 4
         };
-        Assert.Equal(30, settings.FrameRate);
         Assert.Equal(1, settings.Sensitivity);
         Assert.Equal(1, settings.Smoothing);
     }
@@ -55,7 +52,6 @@ public sealed class SettingsTests : IDisposable
         File.WriteAllText(Path.Combine(_folder, "settings.json.tmp"), "stale");
         using var store = CreateStore();
         Assert.False(store.Settings.IsEnabled);
-        Assert.Equal(30, store.Settings.FrameRate);
         Assert.False(File.Exists(Path.Combine(_folder, "settings.json.tmp")));
     }
 

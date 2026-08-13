@@ -23,9 +23,8 @@ CLAUDE.md
 .windsurf/
 .github/copilot-instructions.md
 
-# Internal development plans and scratch notes
-docs/roadmap.md
-docs/plans/
+# Internal development documents, plans and scratch notes
+docs/
 PLAN.md
 PLANS.md
 TODO.md

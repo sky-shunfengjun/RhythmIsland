@@ -19,5 +19,5 @@
                                VerticalAlignment="Stretch"
                                IsHitTestVisible="False"
                                ClipToBounds="True"
-                               BarBrush="{Binding Foreground, RelativeSource={RelativeSource FindAncestor, AncestorType=local:SpectrumComponent}}" />
+                               BarBrush="{DynamicResource AccentFillColorDefaultBrush}" />
 </controls:ComponentBase>

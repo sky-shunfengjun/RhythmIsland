@@ -6,6 +6,33 @@ namespace RhythmIsland.Tests;
 public sealed class SpectrumAnalyzerTests
 {
     [Theory]
+    [InlineData(44100, 735)]
+    [InlineData(48000, 800)]
+    [InlineData(96000, 1600)]
+    [InlineData(192000, 3200)]
+    public void HopSizeTargetsSixtyAnalysisFramesPerSecond(int sampleRate, int expectedHopSize)
+    {
+        Assert.Equal(expectedHopSize, SpectrumAnalyzer.CalculateHopSize(sampleRate));
+    }
+
+    [Theory]
+    [InlineData(44100)]
+    [InlineData(48000)]
+    [InlineData(96000)]
+    [InlineData(192000)]
+    public void SteadyStateProducesAboutSixtyFramesPerSecond(int sampleRate)
+    {
+        var analyzer = new SpectrumAnalyzer();
+        analyzer.Configure(sampleRate, 48, 1, 0.65);
+        var frames = 0;
+        analyzer.FrameProduced += (_, _) => frames++;
+
+        analyzer.PushSamples(new float[SpectrumAnalyzer.FftSize + sampleRate]);
+
+        Assert.InRange(frames - 1, 59, 61);
+    }
+
+    [Theory]
     [InlineData(24)]
     [InlineData(32)]
     [InlineData(48)]
@@ -67,6 +94,18 @@ public sealed class SpectrumAnalyzerTests
         Assert.True(frame!.Peak < 0.001f);
         Assert.True(frame.IsSilent);
         Assert.All(frame.Bands, value => Assert.Equal(0, value));
+    }
+
+    [Fact]
+    public void DefaultSmoothingAppliesAtLeastEightyPercentOfInitialAttack()
+    {
+        var analyzer = CreateAnalyzer(smoothing: 0.65);
+        SpectrumFrame? frame = null;
+        analyzer.FrameProduced += (_, value) => frame = value;
+        analyzer.PushSamples(CreateSine(1000, SpectrumAnalyzer.FftSize));
+
+        var first = frame!.Peak;
+        Assert.True(first > 0.70f);
     }
 
     [Fact]

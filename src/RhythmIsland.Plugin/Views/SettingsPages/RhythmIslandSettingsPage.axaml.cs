@@ -2,6 +2,7 @@ using ClassIsland.Core.Abstractions.Controls;
 using ClassIsland.Core.Attributes;
 using ClassIsland.Shared;
 using RhythmIsland.Models;
+using RhythmIsland.Abstractions;
 using RhythmIsland.Services;
 using RhythmIsland.ViewModels;
 
@@ -15,6 +16,7 @@ public partial class RhythmIslandSettingsPage : SettingsPageBase
         InitializeComponent();
         var store = IAppHost.GetService<RhythmIslandSettingsStore>();
         var status = IAppHost.GetService<RuntimeStatus>();
-        DataContext = new RhythmIslandSettingsPageViewModel(store.Settings, status);
+        var runtime = IAppHost.GetService<IRhythmIslandRuntimeService>();
+        DataContext = new RhythmIslandSettingsPageViewModel(store.Settings, status, runtime);
     }
 }

@@ -25,6 +25,7 @@ public sealed class Plugin : PluginBase
         services.AddSingleton<ISpectrumAnalyzer, SpectrumAnalyzer>();
         services.AddSingleton<ISpectrumFrameProvider, SpectrumFrameProvider>();
         services.AddSingleton<ISpectrumRenderClock, SpectrumRenderClock>();
+        services.AddSingleton<ISystemMediaCoverService, SystemMediaCoverService>();
         services.AddSingleton<RhythmIslandRuntimeService>();
         services.AddSingleton<IRhythmIslandRuntimeService>(provider => provider.GetRequiredService<RhythmIslandRuntimeService>());
         services.AddHostedService(provider => provider.GetRequiredService<RhythmIslandRuntimeService>());

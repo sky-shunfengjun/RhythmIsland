@@ -1,6 +1,6 @@
 id: RhythmIsland
-name: 律动岛 · RhythmIsland
-description: 为 ClassIsland 提供可调宽度的默认扬声器实时频谱组件。
+name: 律动岛 RhythmIsland
+description: 为 ClassIsland 提供默认扬声器实时频谱组件。
 entranceAssembly: RhythmIsland.dll
 url: https://github.com/sky-shunfengjun/RhythmIsland
 author: sky-shunfengjun
