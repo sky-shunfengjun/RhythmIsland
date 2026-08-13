@@ -71,7 +71,7 @@ public partial class SpectrumComponent : ComponentBase<SpectrumComponentSettings
 
     private int ResolveEffectiveFrameRate()
     {
-        if (Settings.FrameRate != 0) return Settings.FrameRate;
+        if (Settings.FrameRate is 30 or 60) return Settings.FrameRate;
 
         var now = Environment.TickCount64;
         if (now < _displayRefreshCacheExpiresAt) return _cachedHigherFrameRate;
@@ -81,11 +81,13 @@ public partial class SpectrumComponent : ComponentBase<SpectrumComponentSettings
         {
             var screen = TopLevel.GetTopLevel(this)?.Screens?.ScreenFromVisual(this);
             var refreshRate = screen is null ? null : DisplayRefreshRateProvider.GetForBounds(screen.Bounds);
-            _cachedHigherFrameRate = SpectrumFrameRateOptions.ResolveHigherFrameRate(refreshRate);
+            _cachedHigherFrameRate = SpectrumFrameRatePolicy.ResolveEffectiveFrameRate(Settings.FrameRate, refreshRate);
+            var persisted = SpectrumFrameRatePolicy.ResolvePersistedFrameRate(Settings.FrameRate, refreshRate);
+            if (persisted != Settings.FrameRate) Settings.FrameRate = persisted;
         }
         catch
         {
-            _cachedHigherFrameRate = 60;
+            _cachedHigherFrameRate = SpectrumFrameRatePolicy.ResolveEffectiveFrameRate(Settings.FrameRate, null);
         }
 
         return _cachedHigherFrameRate;
@@ -93,6 +95,7 @@ public partial class SpectrumComponent : ComponentBase<SpectrumComponentSettings
 
     private void OnRefreshTick()
     {
+        BarsControl.SetEffectiveFrameRate(ResolveEffectiveFrameRate());
         var collapsed = _autoCollapse.Update(
             _frames.Latest,
             Settings,

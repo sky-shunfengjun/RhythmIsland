@@ -85,6 +85,22 @@ public sealed class SystemMediaCoverTests
     }
 
     [Fact]
+    public void LargeCoverIsDecodedDirectlyWithinPaletteDimensions()
+    {
+        using var bitmap = new SKBitmap(2_048, 1_024);
+        using (var canvas = new SKCanvas(bitmap)) canvas.Clear(SKColors.CornflowerBlue);
+        using var image = SKImage.FromBitmap(bitmap);
+        using var data = image.Encode(SKEncodedImageFormat.Jpeg, 85);
+
+        var decoded = SystemMediaCoverService.DecodeThumbnail(data.ToArray());
+
+        Assert.NotNull(decoded);
+        Assert.InRange(decoded.Value.Width, 1, 64);
+        Assert.InRange(decoded.Value.Height, 1, 64);
+        Assert.True(decoded.Value.Pixels.Length <= 64 * 64);
+    }
+
+    [Fact]
     public void InvalidAndOversizedEncodedCoverFallsBack()
     {
         Assert.Null(SystemMediaCoverService.ExtractPalette([1, 2, 3, 4]));
@@ -113,5 +129,107 @@ public sealed class SystemMediaCoverTests
         Assert.Equal(0, service.ConsumerCount);
         Assert.Equal(SystemMediaCoverStatus.Stopped, service.Status);
         Assert.Null(service.CurrentPalette);
+    }
+
+    [Fact]
+    public async Task RapidMediaChangesPublishOnlyNewestCoverAndUseOneRefreshLoop()
+    {
+        var firstStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirst = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var firstImage = CreateSolidImage(SKColors.Red);
+        var secondImage = CreateSolidImage(SKColors.Blue);
+        var backend = new FakeMediaBackend(async (request, cancellationToken) =>
+        {
+            if (request == 1)
+            {
+                firstStarted.SetResult();
+                await releaseFirst.Task.WaitAsync(cancellationToken);
+                return firstImage;
+            }
+            return secondImage;
+        });
+        using var service = new SystemMediaCoverService(
+            NullLogger<SystemMediaCoverService>.Instance,
+            () => true,
+            _ => Task.FromResult<ISystemMediaSessionBackend>(backend));
+
+        using var lease = service.Acquire();
+        await firstStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        backend.SignalChanged();
+        releaseFirst.SetResult();
+        await WaitUntilAsync(() => service.Status == SystemMediaCoverStatus.Available);
+
+        Assert.True(backend.MaximumConcurrentReads <= 1);
+        Assert.True(backend.ReadCount >= 2);
+        Assert.NotNull(service.CurrentPalette);
+        Assert.True(service.CurrentPalette!.Primary.B > service.CurrentPalette.Primary.R);
+    }
+
+    [Fact]
+    public async Task ReleasingLastLeaseWaitsForRefreshAndPreventsLateStateWrite()
+    {
+        var readStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var backend = new FakeMediaBackend(async (_, cancellationToken) =>
+        {
+            readStarted.SetResult();
+            await Task.Delay(TimeSpan.FromSeconds(30), cancellationToken);
+            return CreateSolidImage(SKColors.Green);
+        });
+        using var service = new SystemMediaCoverService(
+            NullLogger<SystemMediaCoverService>.Instance,
+            () => true,
+            _ => Task.FromResult<ISystemMediaSessionBackend>(backend));
+
+        var lease = service.Acquire();
+        await readStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        lease.Dispose();
+        await service.LifecycleTask.WaitAsync(TimeSpan.FromSeconds(2));
+
+        Assert.Equal(SystemMediaCoverStatus.Stopped, service.Status);
+        Assert.Null(service.CurrentPalette);
+        Assert.True(backend.IsDisposed);
+        Assert.Equal(0, backend.ActiveReads);
+    }
+
+    private static byte[] CreateSolidImage(SKColor color)
+    {
+        using var bitmap = new SKBitmap(64, 64);
+        using (var canvas = new SKCanvas(bitmap)) canvas.Clear(color);
+        using var image = SKImage.FromBitmap(bitmap);
+        using var data = image.Encode(SKEncodedImageFormat.Png, 100);
+        return data.ToArray();
+    }
+
+    private static async Task WaitUntilAsync(Func<bool> predicate)
+    {
+        var timeout = DateTime.UtcNow + TimeSpan.FromSeconds(2);
+        while (!predicate())
+        {
+            if (DateTime.UtcNow >= timeout) throw new TimeoutException();
+            await Task.Delay(10);
+        }
+    }
+
+    private sealed class FakeMediaBackend(
+        Func<int, CancellationToken, Task<byte[]?>> read) : ISystemMediaSessionBackend
+    {
+        private int _activeReads;
+        public event EventHandler? Changed;
+        public int ReadCount { get; private set; }
+        public int ActiveReads => Volatile.Read(ref _activeReads);
+        public int MaximumConcurrentReads { get; private set; }
+        public bool IsDisposed { get; private set; }
+
+        public async Task<byte[]?> ReadCurrentThumbnailAsync(int maximumBytes, CancellationToken cancellationToken)
+        {
+            var request = ++ReadCount;
+            var active = Interlocked.Increment(ref _activeReads);
+            MaximumConcurrentReads = Math.Max(MaximumConcurrentReads, active);
+            try { return await read(request, cancellationToken); }
+            finally { Interlocked.Decrement(ref _activeReads); }
+        }
+
+        public void SignalChanged() => Changed?.Invoke(this, EventArgs.Empty);
+        public void Dispose() => IsDisposed = true;
     }
 }

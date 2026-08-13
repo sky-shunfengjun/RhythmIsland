@@ -32,12 +32,17 @@ public partial class SpectrumComponentSettingsControl : ComponentBase<SpectrumCo
             // 部分平台或 Headless 环境不会提供刷新率，保守显示到 60 FPS。
         }
 
-        Settings.SetAvailableFrameRates(SpectrumFrameRateOptions.ForRefreshRate(refreshRate));
-        if (!Settings.AvailableFrameRates.Any(option => option.Value == Settings.FrameRate))
-            Settings.FrameRate = Settings.AvailableFrameRates
-                .Where(option => option.Value > 0)
-                .Select(option => option.Value)
-                .DefaultIfEmpty(30)
-                .Max();
+        var options = SpectrumFrameRateOptions.ForRefreshRate(refreshRate);
+        if (refreshRate is null && Settings.FrameRate is 90 or 120 &&
+            options.All(option => option.Value != Settings.FrameRate))
+        {
+            options = options
+                .Append(new SpectrumFrameRateOption(Settings.FrameRate, $"{Settings.FrameRate} FPS（暂时无法检测）"))
+                .OrderBy(option => option.Value == 0 ? int.MaxValue : option.Value)
+                .ToArray();
+        }
+        Settings.SetAvailableFrameRates(options);
+        var persisted = SpectrumFrameRatePolicy.ResolvePersistedFrameRate(Settings.FrameRate, refreshRate);
+        if (persisted != Settings.FrameRate) Settings.FrameRate = persisted;
     }
 }

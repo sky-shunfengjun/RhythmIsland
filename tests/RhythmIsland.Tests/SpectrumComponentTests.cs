@@ -881,6 +881,27 @@ public sealed class SpectrumComponentTests
         Assert.Equal(expected, SpectrumFrameRateOptions.ResolveHigherFrameRate(refreshRate));
     }
 
+    [Theory]
+    [InlineData(90, 60, 60)]
+    [InlineData(120, 75, 60)]
+    [InlineData(90, 90, 90)]
+    [InlineData(120, 144, 120)]
+    [InlineData(60, 30, 60)]
+    [InlineData(0, 75, 75)]
+    public void FrameRatePolicyUsesDisplayCapability(int configured, double refreshRate, int expected)
+    {
+        Assert.Equal(expected, SpectrumFrameRatePolicy.ResolveEffectiveFrameRate(configured, refreshRate));
+    }
+
+    [Theory]
+    [InlineData(90)]
+    [InlineData(120)]
+    public void UnknownRefreshRateDoesNotRewriteSavedHighFrameRate(int configured)
+    {
+        Assert.Equal(configured, SpectrumFrameRatePolicy.ResolvePersistedFrameRate(configured, null));
+        Assert.Equal(60, SpectrumFrameRatePolicy.ResolveEffectiveFrameRate(configured, null));
+    }
+
     [Fact]
     public void LatestFrameCanBeCleared()
     {

@@ -25,7 +25,7 @@ public sealed class SpectrumSettingsLayoutTests
         Assert.Equal(
         [
             "外观", "显示样式", "频谱方向", "颜色与渐变", "发光效果", "基础外观",
-            "频谱", "细节数量", "幅度", "刷新帧率",
+            "频谱", "细节数量", "幅度", "刷新率",
             "功能", "无声自动收起"
         ], sequence);
     }
@@ -46,7 +46,7 @@ public sealed class SpectrumSettingsLayoutTests
         Assert.Equal(["颜色来源", "主色", "第二色", "封面状态", "颜色模式", "渐变方式", "流动速度"], colorItems);
         Assert.Equal("True", (string?)basic.Attribute("IsExpanded"));
         Assert.Equal(
-            ["透明度", "组件长度"],
+            ["不透明度", "组件长度"],
             basic.Descendants()
                 .Where(element => element.Name.LocalName == "SettingsExpanderItem")
                 .Select(element => (string)element.Attribute("Content")!)

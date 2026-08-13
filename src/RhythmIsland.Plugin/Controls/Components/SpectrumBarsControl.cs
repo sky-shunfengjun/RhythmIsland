@@ -40,6 +40,7 @@ public sealed class SpectrumBarsControl : Control
     private SpectrumPalette? _mediaPalette;
     private MediaPaletteCacheKey? _mediaPaletteCacheKey;
     private SpectrumPalette? _cachedProcessedMediaPalette;
+    private int _effectiveFrameRate = 30;
 
     internal int ResampleBufferCapacity => _frameInterpolator.BufferCapacity;
     internal int BarRectangleBufferCapacity => _barRectangles.Length;
@@ -55,6 +56,8 @@ public sealed class SpectrumBarsControl : Control
     internal void SetComponentSettings(SpectrumComponentSettings settings) => _componentSettings = settings;
 
     internal void SetMediaPalette(SpectrumPalette? palette) => _mediaPalette = palette;
+
+    internal void SetEffectiveFrameRate(int frameRate) => _effectiveFrameRate = frameRate;
 
     public override void Render(DrawingContext context)
     {
@@ -85,7 +88,7 @@ public sealed class SpectrumBarsControl : Control
 
         var opacity = Math.Clamp(componentSettings.Opacity, 0.1, 1.0);
         var bands = _frameInterpolator.Resolve(frame, componentSettings.BarCount,
-            componentSettings.Amplitude, componentSettings.FrameRate, now);
+            componentSettings.Amplitude, _effectiveFrameRate, now);
         if (!SpectrumBandResampler.HasVisibleSignal(bands)) return;
 
         var padding = ResolveSafetyPadding(componentSettings.DisplayMode);

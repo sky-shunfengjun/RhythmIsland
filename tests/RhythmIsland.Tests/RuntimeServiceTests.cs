@@ -212,6 +212,26 @@ public sealed class RuntimeServiceTests : IDisposable
         Assert.True(latch.TryEnterFault());
     }
 
+    [Fact]
+    public void CaptureInstanceGuardRejectsCallbacksFromPreviousCapture()
+    {
+        var guard = new CaptureInstanceGuard();
+        var first = new object();
+        var firstId = guard.Begin(first);
+        Assert.True(guard.IsCurrent(firstId, first));
+
+        var second = new object();
+        var secondId = guard.Begin(second);
+        Assert.False(guard.IsCurrent(firstId, first));
+        Assert.False(guard.IsCurrent(firstId, second));
+        Assert.True(guard.IsCurrent(secondId, second));
+
+        guard.Clear(firstId, first);
+        Assert.True(guard.IsCurrent(secondId, second));
+        guard.Clear(secondId, second);
+        Assert.False(guard.IsCurrent(secondId, second));
+    }
+
     private RhythmIslandRuntimeService CreateRuntime(FakeCapture capture, RhythmIslandSettingsStore store,
         FakeAnalyzer? analyzer = null) =>
         new(capture, analyzer ?? new FakeAnalyzer(), new SpectrumFrameProvider(), store, new RuntimeStatus(),

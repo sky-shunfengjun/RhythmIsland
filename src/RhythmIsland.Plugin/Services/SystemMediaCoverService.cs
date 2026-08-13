@@ -1,5 +1,6 @@
+using System.Diagnostics.CodeAnalysis;
+using System.Threading.Channels;
 using Windows.Foundation.Metadata;
-using Windows.Media.Control;
 using Microsoft.Extensions.Logging;
 using RhythmIsland.Abstractions;
 using RhythmIsland.Models;
@@ -11,6 +12,7 @@ public sealed class SystemMediaCoverService : ISystemMediaCoverService, IDisposa
 {
     private const int MaximumEncodedBytes = 10 * 1024 * 1024;
     private const long MaximumSourcePixels = 4_096L * 4_096L;
+    private const long MaximumIntermediatePixels = 2_048L * 2_048L;
     private const int PaletteDimension = 64;
     private const string SessionManagerTypeName =
         "Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager";
@@ -18,11 +20,15 @@ public sealed class SystemMediaCoverService : ISystemMediaCoverService, IDisposa
     private readonly object _sync = new();
     private readonly ILogger<SystemMediaCoverService> _logger;
     private readonly Func<bool> _apiAvailabilityProbe;
-    private GlobalSystemMediaTransportControlsSessionManager? _manager;
-    private GlobalSystemMediaTransportControlsSession? _session;
+    private readonly Func<CancellationToken, Task<ISystemMediaSessionBackend>> _backendFactory;
+    private ISystemMediaSessionBackend? _backend;
+    private CancellationTokenSource? _runCancellation;
     private CancellationTokenSource? _refreshCancellation;
+    private Channel<long>? _refreshRequests;
+    private Task _refreshTask = Task.CompletedTask;
     private Task _lifecycleTask = Task.CompletedTask;
     private int _consumerCount;
+    private long _refreshVersion;
     private bool _desiredRunning;
     private bool _disposed;
     private bool _initializationFailureLogged;
@@ -30,14 +36,19 @@ public sealed class SystemMediaCoverService : ISystemMediaCoverService, IDisposa
     private SystemMediaCoverStatus _status = SystemMediaCoverStatus.Stopped;
     private string _statusText = "未启用音乐封面取色。";
 
-    public SystemMediaCoverService(ILogger<SystemMediaCoverService> logger) : this(logger, IsApiAvailable)
+    public SystemMediaCoverService(ILogger<SystemMediaCoverService> logger) : this(
+        logger, IsApiAvailable, CreateBackendAfterAvailabilityCheckAsync)
     {
     }
 
-    internal SystemMediaCoverService(ILogger<SystemMediaCoverService> logger, Func<bool> apiAvailabilityProbe)
+    internal SystemMediaCoverService(
+        ILogger<SystemMediaCoverService> logger,
+        Func<bool> apiAvailabilityProbe,
+        Func<CancellationToken, Task<ISystemMediaSessionBackend>>? backendFactory = null)
     {
         _logger = logger;
         _apiAvailabilityProbe = apiAvailabilityProbe;
+        _backendFactory = backendFactory ?? CreateBackendAfterAvailabilityCheckAsync;
     }
 
     public event EventHandler? Changed;
@@ -62,6 +73,10 @@ public sealed class SystemMediaCoverService : ISystemMediaCoverService, IDisposa
     {
         get { lock (_sync) return _lifecycleTask; }
     }
+    internal Task RefreshTask
+    {
+        get { lock (_sync) return _refreshTask; }
+    }
 
     public IDisposable Acquire()
     {
@@ -73,11 +88,9 @@ public sealed class SystemMediaCoverService : ISystemMediaCoverService, IDisposa
     private void Release()
     {
         var remaining = Interlocked.Decrement(ref _consumerCount);
-        if (remaining <= 0)
-        {
-            Interlocked.Exchange(ref _consumerCount, 0);
-            QueueLifecycle(false);
-        }
+        if (remaining > 0) return;
+        Interlocked.Exchange(ref _consumerCount, 0);
+        QueueLifecycle(false);
     }
 
     private void QueueLifecycle(bool shouldRun)
@@ -87,10 +100,8 @@ public sealed class SystemMediaCoverService : ISystemMediaCoverService, IDisposa
             if (_disposed) shouldRun = false;
             _desiredRunning = shouldRun;
             _lifecycleTask = _lifecycleTask.ContinueWith(
-                _ => ReconcileAsync(),
-                CancellationToken.None,
-                TaskContinuationOptions.None,
-                TaskScheduler.Default).Unwrap();
+                _ => ReconcileAsync(), CancellationToken.None,
+                TaskContinuationOptions.None, TaskScheduler.Default).Unwrap();
         }
     }
 
@@ -100,14 +111,17 @@ public sealed class SystemMediaCoverService : ISystemMediaCoverService, IDisposa
         lock (_sync) shouldRun = _desiredRunning && !_disposed;
         if (!shouldRun)
         {
-            StopCore();
+            await StopCoreAsync();
             return;
         }
 
-        if (_manager is not null)
+        lock (_sync)
         {
-            ScheduleRefresh();
-            return;
+            if (_backend is not null)
+            {
+                RequestRefresh();
+                return;
+            }
         }
 
         SetState(SystemMediaCoverStatus.Starting, "正在获取 Windows 媒体封面…", null);
@@ -115,20 +129,34 @@ public sealed class SystemMediaCoverService : ISystemMediaCoverService, IDisposa
         {
             if (!_apiAvailabilityProbe())
             {
-                SetState(SystemMediaCoverStatus.Unsupported, "当前 Windows 版本无法获取媒体封面，正在使用主题色。", null);
+                SetState(SystemMediaCoverStatus.Unsupported,
+                    "当前 Windows 版本无法获取媒体封面，正在使用主题色。", null);
                 return;
             }
 
-            var manager = await GlobalSystemMediaTransportControlsSessionManager.RequestAsync();
+            var backend = await _backendFactory(CancellationToken.None);
             lock (_sync)
             {
-                if (!_desiredRunning || _disposed) return;
-                _manager = manager;
-                _manager.CurrentSessionChanged += OnCurrentSessionChanged;
-                _manager.SessionsChanged += OnSessionsChanged;
+                if (!_desiredRunning || _disposed)
+                {
+                    backend.Dispose();
+                    return;
+                }
+
+                _backend = backend;
+                _backend.Changed += OnBackendChanged;
+                _runCancellation = new CancellationTokenSource();
+                _refreshRequests = Channel.CreateBounded<long>(new BoundedChannelOptions(1)
+                {
+                    FullMode = BoundedChannelFullMode.DropOldest,
+                    SingleReader = true,
+                    SingleWriter = false
+                });
+                _refreshTask = RunRefreshLoopAsync(
+                    _refreshRequests.Reader, backend, _runCancellation.Token);
                 _initializationFailureLogged = false;
             }
-            ScheduleRefresh();
+            RequestRefresh();
         }
         catch (Exception exception)
         {
@@ -137,88 +165,89 @@ public sealed class SystemMediaCoverService : ISystemMediaCoverService, IDisposa
                 _initializationFailureLogged = true;
                 _logger.LogWarning(exception, "无法初始化 Windows 媒体封面服务，将使用主题色。");
             }
-            SetState(SystemMediaCoverStatus.Faulted, "当前无法获取媒体封面，正在使用主题色。", null);
+            SetState(SystemMediaCoverStatus.Faulted,
+                "当前无法获取媒体封面，正在使用主题色。", null);
         }
     }
 
     internal static bool IsApiAvailable()
     {
+        if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 17763)) return false;
         try { return ApiInformation.IsTypePresent(SessionManagerTypeName); }
         catch { return false; }
     }
 
-    private void OnCurrentSessionChanged(
-        GlobalSystemMediaTransportControlsSessionManager sender,
-        CurrentSessionChangedEventArgs eventArgs) => ScheduleRefresh();
+    [UnconditionalSuppressMessage("Interoperability", "CA1416",
+        Justification = "Only called after the Windows 10 1809 and ApiInformation runtime guard succeeds.")]
+    private static Task<ISystemMediaSessionBackend> CreateBackendAfterAvailabilityCheckAsync(
+        CancellationToken cancellationToken) => WindowsSystemMediaSessionBackend.CreateAsync(cancellationToken);
 
-    private void OnSessionsChanged(
-        GlobalSystemMediaTransportControlsSessionManager sender,
-        SessionsChangedEventArgs eventArgs) => ScheduleRefresh();
+    private void OnBackendChanged(object? sender, EventArgs eventArgs) => RequestRefresh();
 
-    private void OnMediaPropertiesChanged(
-        GlobalSystemMediaTransportControlsSession sender,
-        MediaPropertiesChangedEventArgs eventArgs) => ScheduleRefresh();
-
-    private void ScheduleRefresh()
+    private void RequestRefresh()
     {
-        CancellationToken token;
+        Channel<long>? requests;
+        long version;
         lock (_sync)
         {
-            if (!_desiredRunning || _disposed || _manager is null) return;
+            if (!_desiredRunning || _disposed || _backend is null || _refreshRequests is null) return;
+            version = ++_refreshVersion;
             _refreshCancellation?.Cancel();
-            _refreshCancellation?.Dispose();
-            _refreshCancellation = new CancellationTokenSource();
-            token = _refreshCancellation.Token;
+            requests = _refreshRequests;
         }
-        _ = RefreshAsync(token);
+        requests.Writer.TryWrite(version);
     }
 
-    private async Task RefreshAsync(CancellationToken cancellationToken)
+    private async Task RunRefreshLoopAsync(
+        ChannelReader<long> reader,
+        ISystemMediaSessionBackend backend,
+        CancellationToken cancellationToken)
     {
         try
         {
-            GlobalSystemMediaTransportControlsSessionManager? manager;
-            lock (_sync) manager = _manager;
-            if (manager is null) return;
-
-            var session = manager.GetCurrentSession();
-            AttachSession(session);
-            if (session is null)
+            while (await reader.WaitToReadAsync(cancellationToken))
             {
-                SetState(SystemMediaCoverStatus.Unavailable, "当前没有可用的媒体封面，正在使用主题色。", null);
-                return;
-            }
+                if (!reader.TryRead(out var version)) continue;
+                while (reader.TryRead(out var newerVersion)) version = newerVersion;
 
-            var properties = await session.TryGetMediaPropertiesAsync().AsTask(cancellationToken);
+                using var operation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                lock (_sync) _refreshCancellation = operation;
+                await RefreshOnceAsync(backend, version, operation.Token);
+                lock (_sync)
+                {
+                    if (ReferenceEquals(_refreshCancellation, operation)) _refreshCancellation = null;
+                }
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+    }
+
+    private async Task RefreshOnceAsync(
+        ISystemMediaSessionBackend backend,
+        long version,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var thumbnail = await backend.ReadCurrentThumbnailAsync(MaximumEncodedBytes, cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
-            if (properties?.Thumbnail is null)
+            if (thumbnail is null)
             {
-                SetState(SystemMediaCoverStatus.Unavailable, "当前媒体没有封面，正在使用主题色。", null);
+                TrySetRefreshState(version, SystemMediaCoverStatus.Unavailable,
+                    "当前媒体没有可用封面，正在使用主题色。", null);
                 return;
             }
 
-            using var randomAccessStream = await properties.Thumbnail.OpenReadAsync().AsTask(cancellationToken);
-            if (randomAccessStream.Size == 0 || randomAccessStream.Size > MaximumEncodedBytes)
-            {
-                SetState(SystemMediaCoverStatus.Unavailable, "当前媒体封面无法用于取色，正在使用主题色。", null);
-                return;
-            }
-
-            using var stream = randomAccessStream.AsStreamForRead();
-            using var memory = new MemoryStream((int)randomAccessStream.Size);
-            await stream.CopyToAsync(memory, cancellationToken);
+            var palette = await Task.Run(() => ExtractPalette(thumbnail), cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
-            if (memory.Length > MaximumEncodedBytes)
-            {
-                SetState(SystemMediaCoverStatus.Unavailable, "当前媒体封面过大，正在使用主题色。", null);
-                return;
-            }
-
-            var palette = await Task.Run(() => ExtractPalette(memory.ToArray()), cancellationToken);
-            cancellationToken.ThrowIfCancellationRequested();
-            SetState(
+            TrySetRefreshState(
+                version,
                 palette is null ? SystemMediaCoverStatus.Unavailable : SystemMediaCoverStatus.Available,
-                palette is null ? "当前媒体封面无法用于取色，正在使用主题色。" : "已识别当前媒体封面，正在使用封面配色。",
+                palette is null
+                    ? "当前媒体封面无法用于取色，正在使用主题色。"
+                    : "已识别当前媒体封面，正在使用封面配色。",
                 palette);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -227,11 +256,39 @@ public sealed class SystemMediaCoverService : ISystemMediaCoverService, IDisposa
         catch (Exception exception)
         {
             _logger.LogDebug(exception, "读取 Windows 媒体封面失败。");
-            SetState(SystemMediaCoverStatus.Unavailable, "当前无法读取媒体封面，正在使用主题色。", null);
+            TrySetRefreshState(version, SystemMediaCoverStatus.Unavailable,
+                "当前无法读取媒体封面，正在使用主题色。", null);
         }
     }
 
+    private void TrySetRefreshState(
+        long version,
+        SystemMediaCoverStatus status,
+        string text,
+        SpectrumPalette? palette)
+    {
+        var changed = false;
+        lock (_sync)
+        {
+            if (!_desiredRunning || _disposed || version != _refreshVersion) return;
+            if (_status != status || _statusText != text || _currentPalette != palette)
+            {
+                _status = status;
+                _statusText = text;
+                _currentPalette = palette;
+                changed = true;
+            }
+        }
+        if (changed) Changed?.Invoke(this, EventArgs.Empty);
+    }
+
     internal static SpectrumPalette? ExtractPalette(byte[] encodedImage)
+    {
+        var decoded = DecodeThumbnail(encodedImage);
+        return decoded is null ? null : CoverPaletteExtractor.Extract(decoded.Value.Pixels);
+    }
+
+    internal static DecodedCover? DecodeThumbnail(byte[] encodedImage)
     {
         if (encodedImage.Length == 0 || encodedImage.Length > MaximumEncodedBytes) return null;
         using var data = SKData.CreateCopy(encodedImage);
@@ -240,52 +297,67 @@ public sealed class SystemMediaCoverService : ISystemMediaCoverService, IDisposa
             (long)codec.Info.Width * codec.Info.Height > MaximumSourcePixels)
             return null;
 
-        using var decoded = SKBitmap.Decode(data);
+        var targetScale = Math.Min(1f, PaletteDimension / (float)Math.Max(codec.Info.Width, codec.Info.Height));
+        var codecDimensions = codec.GetScaledDimensions(targetScale);
+        if ((long)codecDimensions.Width * codecDimensions.Height > MaximumIntermediatePixels) return null;
+
+        var decodeInfo = new SKImageInfo(
+            Math.Max(1, codecDimensions.Width), Math.Max(1, codecDimensions.Height),
+            SKColorType.Rgba8888, SKAlphaType.Unpremul);
+        using var decoded = SKBitmap.Decode(codec, decodeInfo);
         if (decoded is null) return null;
-        var width = Math.Min(PaletteDimension, decoded.Width);
-        var height = Math.Min(PaletteDimension, decoded.Height);
+
+        var outputScale = Math.Min(1d, PaletteDimension / (double)Math.Max(decoded.Width, decoded.Height));
+        var width = Math.Clamp((int)Math.Round(decoded.Width * outputScale), 1, PaletteDimension);
+        var height = Math.Clamp((int)Math.Round(decoded.Height * outputScale), 1, PaletteDimension);
+        using var bitmap = decoded.Width == width && decoded.Height == height
+            ? decoded.Copy()
+            : decoded.Resize(new SKImageInfo(width, height, SKColorType.Rgba8888, SKAlphaType.Unpremul),
+                SKFilterQuality.Medium);
+        if (bitmap is null) return null;
 
         var pixels = new CoverPixel[width * height];
         var index = 0;
         for (var y = 0; y < height; y++)
         for (var x = 0; x < width; x++)
         {
-            var sourceX = Math.Min(decoded.Width - 1, (int)((x + 0.5) * decoded.Width / width));
-            var sourceY = Math.Min(decoded.Height - 1, (int)((y + 0.5) * decoded.Height / height));
-            var color = decoded.GetPixel(sourceX, sourceY);
+            var color = bitmap.GetPixel(x, y);
             pixels[index++] = new CoverPixel(color.Red, color.Green, color.Blue, color.Alpha);
         }
-        return CoverPaletteExtractor.Extract(pixels);
+        return new DecodedCover(pixels, width, height);
     }
 
-    private void AttachSession(GlobalSystemMediaTransportControlsSession? session)
+    private async Task StopCoreAsync()
     {
+        CancellationTokenSource? runCancellation;
+        CancellationTokenSource? refreshCancellation;
+        Channel<long>? requests;
+        Task refreshTask;
+        ISystemMediaSessionBackend? backend;
         lock (_sync)
         {
-            if (!_desiredRunning || _disposed || _manager is null) return;
-            if (ReferenceEquals(_session, session)) return;
-            if (_session is not null) _session.MediaPropertiesChanged -= OnMediaPropertiesChanged;
-            _session = session;
-            if (_session is not null) _session.MediaPropertiesChanged += OnMediaPropertiesChanged;
-        }
-    }
-
-    private void StopCore()
-    {
-        lock (_sync)
-        {
-            _refreshCancellation?.Cancel();
-            _refreshCancellation?.Dispose();
+            runCancellation = _runCancellation;
+            refreshCancellation = _refreshCancellation;
+            requests = _refreshRequests;
+            refreshTask = _refreshTask;
+            backend = _backend;
+            _runCancellation = null;
             _refreshCancellation = null;
-            if (_session is not null) _session.MediaPropertiesChanged -= OnMediaPropertiesChanged;
-            _session = null;
-            if (_manager is not null)
-            {
-                _manager.CurrentSessionChanged -= OnCurrentSessionChanged;
-                _manager.SessionsChanged -= OnSessionsChanged;
-            }
-            _manager = null;
+            _refreshRequests = null;
+            _refreshTask = Task.CompletedTask;
+            _backend = null;
+            ++_refreshVersion;
+            if (backend is not null) backend.Changed -= OnBackendChanged;
         }
+
+        refreshCancellation?.Cancel();
+        runCancellation?.Cancel();
+        requests?.Writer.TryComplete();
+        try { await refreshTask; }
+        catch (OperationCanceledException) { }
+        backend?.Dispose();
+        refreshCancellation?.Dispose();
+        runCancellation?.Dispose();
         SetState(SystemMediaCoverStatus.Stopped, "未启用音乐封面取色。", null);
     }
 
@@ -313,8 +385,10 @@ public sealed class SystemMediaCoverService : ISystemMediaCoverService, IDisposa
             _disposed = true;
             _desiredRunning = false;
         }
-        StopCore();
+        StopCoreAsync().GetAwaiter().GetResult();
     }
+
+    internal readonly record struct DecodedCover(CoverPixel[] Pixels, int Width, int Height);
 
     private sealed class Lease(SystemMediaCoverService owner) : IDisposable
     {
