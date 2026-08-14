@@ -41,6 +41,32 @@ public sealed class SpectrumRenderingTests
     }
 
     [AvaloniaFact]
+    public void EveryStyleDirectionAndFrequencyBalanceRendersWithHorizontalMirror()
+    {
+        foreach (var style in Enum.GetValues<SpectrumVisualizationStyle>())
+        foreach (var mode in Enum.GetValues<SpectrumDisplayMode>())
+        foreach (var balanceMode in Enum.GetValues<SpectrumFrequencyBalanceMode>())
+        {
+            var provider = new SpectrumFrameProvider();
+            provider.Publish(CreateFrame(0));
+            var control = CreateControl(provider, style, mode, 48, new Size(300, 64));
+            control.SetComponentSettings(new SpectrumComponentSettings
+            {
+                VisualizationStyle = style,
+                DisplayMode = mode,
+                HorizontalMirrorEnabled = true,
+                FrequencyBalanceMode = balanceMode,
+                BarCount = 48,
+                GradientMode = SpectrumGradientMode.Dynamic,
+                GlowEnabled = true,
+                GlowIntensity = 0.75
+            });
+            using var bitmap = new RenderTargetBitmap(new PixelSize(300, 64), new Vector(96, 96));
+            bitmap.Render(control);
+        }
+    }
+
+    [AvaloniaFact]
     public void EveryStyleAndDirectionRendersDynamicCoverGradient()
     {
         foreach (var style in Enum.GetValues<SpectrumVisualizationStyle>())

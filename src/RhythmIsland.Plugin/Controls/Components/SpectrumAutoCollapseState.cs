@@ -22,7 +22,12 @@ internal sealed class SpectrumAutoCollapseState
 
         var isAudible = frame is not null
                         && !frame.IsSilent
-                        && SpectrumBandResampler.HasVisibleSignal(frame.Bands, settings.Amplitude)
+                        && SpectrumDisplayProcessor.HasVisibleSignal(
+                            frame.Bands,
+                            settings.BarCount,
+                            settings.FrequencyBalanceMode,
+                            settings.Amplitude,
+                            settings.HorizontalMirrorEnabled)
                         && now - frame.GeneratedAt <= AudibleFrameFreshness;
         if (isAudible)
         {

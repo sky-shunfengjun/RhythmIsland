@@ -184,6 +184,27 @@
                 </fa:SettingsExpander.Footer>
             </fa:SettingsExpander>
 
+            <fa:SettingsExpander IconSource="{ci:FluentIconSource &#xE09B;}"
+                                 Header="中心镜像"
+                                 Description="将低频放在中间，高频向左右两侧对称展开。">
+                <fa:SettingsExpander.Footer>
+                    <ToggleSwitch IsChecked="{Binding Settings.HorizontalMirrorEnabled, Mode=TwoWay}" />
+                </fa:SettingsExpander.Footer>
+            </fa:SettingsExpander>
+
+            <fa:SettingsExpander IconSource="{ci:FluentIconSource &#xE9D9;}"
+                                 Header="频率均衡补偿"
+                                 Description="适当增强中高频，让频谱整体看起来更加均衡。">
+                <fa:SettingsExpander.Footer>
+                    <ComboBox Width="140"
+                              SelectedIndex="{Binding Settings.FrequencyBalanceModeIndex, Mode=TwoWay}">
+                        <ComboBoxItem Content="原始" />
+                        <ComboBoxItem Content="均衡" />
+                        <ComboBoxItem Content="突出高频" />
+                    </ComboBox>
+                </fa:SettingsExpander.Footer>
+            </fa:SettingsExpander>
+
             <fa:SettingsExpander IconSource="{ci:FluentIconSource &#xEFF7;}"
                                  Header="幅度"
                                  Description="调整频谱对声音的显示高度。">

@@ -4,6 +4,7 @@ namespace RhythmIsland.Models;
 
 public enum SpectrumDisplayMode { BottomUp, Centered }
 public enum SpectrumVisualizationStyle { Bars, SmoothLine, FilledCurve }
+public enum SpectrumFrequencyBalanceMode { Original, Balanced, HighBoost }
 
 public sealed class RhythmIslandSettings : ObservableObject
 {

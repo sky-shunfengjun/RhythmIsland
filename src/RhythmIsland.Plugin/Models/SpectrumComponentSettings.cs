@@ -27,6 +27,8 @@ public sealed class SpectrumComponentSettings : ObservableObject, IJsonOnDeseria
     private double _glowIntensity = 0.50;
     private int _frameRate = 30;
     private int _barCount = 48;
+    private bool _horizontalMirrorEnabled = true;
+    private SpectrumFrequencyBalanceMode _frequencyBalanceMode = SpectrumFrequencyBalanceMode.Balanced;
     private double _amplitude = 1.0;
     private double _opacity = 1.00;
     private double _width = 240;
@@ -255,6 +257,32 @@ public sealed class SpectrumComponentSettings : ObservableObject, IJsonOnDeseria
         {
             SetProperty(ref _barCount, RhythmIslandSettings.AllowedBarCounts.Contains(value) ? value : 48);
         }
+    }
+
+    public bool HorizontalMirrorEnabled
+    {
+        get => _horizontalMirrorEnabled;
+        set => SetProperty(ref _horizontalMirrorEnabled, value);
+    }
+
+    public SpectrumFrequencyBalanceMode FrequencyBalanceMode
+    {
+        get => _frequencyBalanceMode;
+        set
+        {
+            var validated = Enum.IsDefined(value) ? value : SpectrumFrequencyBalanceMode.Balanced;
+            if (!SetProperty(ref _frequencyBalanceMode, validated)) return;
+            OnPropertyChanged(nameof(FrequencyBalanceModeIndex));
+        }
+    }
+
+    [JsonIgnore]
+    public int FrequencyBalanceModeIndex
+    {
+        get => (int)FrequencyBalanceMode;
+        set => FrequencyBalanceMode = value is >= 0 and <= 2
+            ? (SpectrumFrequencyBalanceMode)value
+            : SpectrumFrequencyBalanceMode.Balanced;
     }
 
     public double Amplitude

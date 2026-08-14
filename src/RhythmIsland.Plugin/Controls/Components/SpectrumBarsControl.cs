@@ -88,7 +88,8 @@ public sealed class SpectrumBarsControl : Control
 
         var opacity = Math.Clamp(componentSettings.Opacity, 0.1, 1.0);
         var bands = _frameInterpolator.Resolve(frame, componentSettings.BarCount,
-            componentSettings.Amplitude, _effectiveFrameRate, now);
+            componentSettings.Amplitude, _effectiveFrameRate, now,
+            componentSettings.FrequencyBalanceMode, componentSettings.HorizontalMirrorEnabled);
         if (!SpectrumBandResampler.HasVisibleSignal(bands)) return;
 
         var padding = ResolveSafetyPadding(componentSettings.DisplayMode);

@@ -148,6 +148,8 @@ public sealed class SpectrumComponentTests
             GlowIntensity = 0.75,
             FrameRate = 120,
             BarCount = 64,
+            HorizontalMirrorEnabled = false,
+            FrequencyBalanceMode = SpectrumFrequencyBalanceMode.HighBoost,
             Amplitude = 1.75,
             Opacity = 0.4,
             Width = 360,
@@ -167,6 +169,8 @@ public sealed class SpectrumComponentTests
         Assert.Equal(0.75, restored.GlowIntensity);
         Assert.Equal(120, restored.FrameRate);
         Assert.Equal(64, restored.BarCount);
+        Assert.False(restored.HorizontalMirrorEnabled);
+        Assert.Equal(SpectrumFrequencyBalanceMode.HighBoost, restored.FrequencyBalanceMode);
         Assert.Equal(1.75, restored.Amplitude);
         Assert.Equal(0.4, restored.Opacity);
         Assert.Equal(360, restored.Width);
@@ -180,6 +184,7 @@ public sealed class SpectrumComponentTests
         var settings = new SpectrumComponentSettings
         {
             BarCount = 17,
+            FrequencyBalanceMode = (SpectrumFrequencyBalanceMode)999,
             Amplitude = double.NaN,
             Opacity = double.NaN,
             GlowIntensity = double.NaN,
@@ -187,6 +192,8 @@ public sealed class SpectrumComponentTests
             SilenceCollapseDelaySeconds = double.NaN
         };
         Assert.Equal(48, settings.BarCount);
+        Assert.True(settings.HorizontalMirrorEnabled);
+        Assert.Equal(SpectrumFrequencyBalanceMode.Balanced, settings.FrequencyBalanceMode);
         Assert.Equal(1, settings.Amplitude);
         Assert.Equal(1, settings.Opacity);
         Assert.Equal(0.50, settings.GlowIntensity);
@@ -275,6 +282,120 @@ public sealed class SpectrumComponentTests
         Assert.False(restored.GlowEnabled);
         Assert.Equal(0.50, restored.GlowIntensity);
         Assert.Equal(30, restored.FrameRate);
+        Assert.True(restored.HorizontalMirrorEnabled);
+        Assert.Equal(SpectrumFrequencyBalanceMode.Balanced, restored.FrequencyBalanceMode);
+    }
+
+    [Theory]
+    [InlineData(24)]
+    [InlineData(32)]
+    [InlineData(48)]
+    [InlineData(64)]
+    [InlineData(96)]
+    public void HorizontalMirrorKeepsRequestedDetailCountAndMatchesBothSides(int detailCount)
+    {
+        var source = Enumerable.Range(0, 96).Select(index => 0.8f - index / 140f).ToArray();
+        var destination = new float[detailCount];
+        var resampleBuffer = new float[detailCount / 2];
+
+        SpectrumDisplayProcessor.ProcessInto(source, destination, resampleBuffer,
+            SpectrumFrequencyBalanceMode.Balanced, 1, true);
+
+        Assert.Equal(detailCount, destination.Length);
+        for (var index = 0; index < detailCount / 2; index++)
+            Assert.Equal(destination[index], destination[^(index + 1)], 6);
+        Assert.True(destination[detailCount / 2] > destination[0]);
+    }
+
+    [Fact]
+    public void DisabledHorizontalMirrorKeepsLowToHighOrder()
+    {
+        var source = Enumerable.Range(0, 96).Select(index => 0.01f + index / 120f).ToArray();
+        var destination = new float[48];
+        var resampleBuffer = new float[48];
+
+        SpectrumDisplayProcessor.ProcessInto(source, destination, resampleBuffer,
+            SpectrumFrequencyBalanceMode.Original, 1, false);
+
+        Assert.True(destination[0] < destination[^1]);
+        Assert.NotEqual(destination[0], destination[^1]);
+    }
+
+    [Fact]
+    public void FrequencyBalanceModesProgressivelyRaiseHighBandsWithoutAmplifyingNoise()
+    {
+        const float signal = 0.2f;
+        var originalLow = SpectrumDisplayProcessor.ApplyFrequencyBalance(
+            signal, 0, 48, SpectrumFrequencyBalanceMode.Original);
+        var balancedLow = SpectrumDisplayProcessor.ApplyFrequencyBalance(
+            signal, 0, 48, SpectrumFrequencyBalanceMode.Balanced);
+        var balancedHigh = SpectrumDisplayProcessor.ApplyFrequencyBalance(
+            signal, 47, 48, SpectrumFrequencyBalanceMode.Balanced);
+        var boostedHigh = SpectrumDisplayProcessor.ApplyFrequencyBalance(
+            signal, 47, 48, SpectrumFrequencyBalanceMode.HighBoost);
+
+        Assert.Equal(signal, originalLow);
+        Assert.Equal(signal, balancedLow, 6);
+        Assert.True(balancedHigh > balancedLow);
+        Assert.True(boostedHigh > balancedHigh);
+        Assert.True(boostedHigh < 1);
+        Assert.Equal(0, SpectrumDisplayProcessor.ApplyFrequencyBalance(
+            0.004f, 47, 48, SpectrumFrequencyBalanceMode.HighBoost));
+        Assert.Equal(0, SpectrumDisplayProcessor.ApplyFrequencyBalance(
+            float.NaN, 47, 48, SpectrumFrequencyBalanceMode.HighBoost));
+    }
+
+    [Fact]
+    public void InvalidFrequencyBalanceFallsBackToBalancedProcessing()
+    {
+        var invalid = SpectrumDisplayProcessor.ApplyFrequencyBalance(
+            0.2f, 47, 48, (SpectrumFrequencyBalanceMode)999);
+        var balanced = SpectrumDisplayProcessor.ApplyFrequencyBalance(
+            0.2f, 47, 48, SpectrumFrequencyBalanceMode.Balanced);
+
+        Assert.Equal(balanced, invalid);
+    }
+
+    [Fact]
+    public void FrequencyBalanceAndAmplitudeDetermineAutoCollapseVisibility()
+    {
+        var settings = new SpectrumComponentSettings
+        {
+            FrequencyBalanceMode = SpectrumFrequencyBalanceMode.Original,
+            Amplitude = 0.25,
+            SilenceCollapseDelaySeconds = 1
+        };
+        var frameTime = DateTimeOffset.UtcNow;
+        var frame = new SpectrumFrame(Enumerable.Repeat(0.01f, 96), frameTime, false);
+
+        Assert.False(SpectrumDisplayProcessor.HasVisibleSignal(
+            frame.Bands, settings.BarCount, settings.FrequencyBalanceMode,
+            settings.Amplitude, settings.HorizontalMirrorEnabled));
+
+        settings.Amplitude = 1;
+        Assert.True(SpectrumDisplayProcessor.HasVisibleSignal(
+            frame.Bands, settings.BarCount, settings.FrequencyBalanceMode,
+            settings.Amplitude, settings.HorizontalMirrorEnabled));
+    }
+
+    [Fact]
+    public void ChangingMirrorOrBalanceImmediatelyRebuildsHighFrameRatePicture()
+    {
+        var interpolator = new SpectrumFrameInterpolator();
+        var now = DateTimeOffset.UtcNow;
+        var frame = new SpectrumFrame(
+            Enumerable.Range(0, 96).Select(index => 0.8f - index / 140f).ToArray(),
+            now,
+            false);
+
+        var original = interpolator.Resolve(frame, 48, 1, 120, now,
+            SpectrumFrequencyBalanceMode.Original, false).ToArray();
+        var mirrored = interpolator.Resolve(frame, 48, 1, 120, now.AddMilliseconds(1),
+            SpectrumFrequencyBalanceMode.Balanced, true).ToArray();
+
+        Assert.NotEqual(original, mirrored);
+        for (var index = 0; index < mirrored.Length / 2; index++)
+            Assert.Equal(mirrored[index], mirrored[^(index + 1)], 6);
     }
 
     [Theory]

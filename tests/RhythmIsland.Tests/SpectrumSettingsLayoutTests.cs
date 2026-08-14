@@ -25,9 +25,26 @@ public sealed class SpectrumSettingsLayoutTests
         Assert.Equal(
         [
             "外观", "显示样式", "频谱方向", "颜色与渐变", "发光效果", "基础外观",
-            "频谱", "细节数量", "幅度", "刷新率",
+            "频谱", "细节数量", "中心镜像", "频率均衡补偿", "幅度", "刷新率",
             "功能", "无声自动收起"
         ], sequence);
+    }
+
+    [Fact]
+    public void SpectrumDisplayOptionsUseRequestedLabelsAndOrder()
+    {
+        var root = LoadSettingsPage();
+        var expanders = root.Descendants().Where(element => element.Name.LocalName == "SettingsExpander").ToArray();
+        var mirror = expanders.Single(element => (string?)element.Attribute("Header") == "中心镜像");
+        var balance = expanders.Single(element => (string?)element.Attribute("Header") == "频率均衡补偿");
+
+        Assert.Contains("低频放在中间", (string?)mirror.Attribute("Description"));
+        Assert.Equal(
+            ["原始", "均衡", "突出高频"],
+            balance.Descendants()
+                .Where(element => element.Name.LocalName == "ComboBoxItem")
+                .Select(element => (string)element.Attribute("Content")!)
+                .ToArray());
     }
 
     [Fact]
