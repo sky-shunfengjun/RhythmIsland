@@ -9,8 +9,8 @@
     <CreateCipx Condition="'$(Configuration)' != 'Release'">false</CreateCipx>
     <AssemblyName>RhythmIsland</AssemblyName>
     <RootNamespace>RhythmIsland</RootNamespace>
-    <Version>0.1.0.0</Version>
-    <FileVersion>0.1.0.0</FileVersion>
+    <Version>1.0.0.0</Version>
+    <FileVersion>1.0.0.0</FileVersion>
     <PackageLicenseExpression>GPL-3.0-or-later</PackageLicenseExpression>
   </PropertyGroup>
 

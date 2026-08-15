@@ -1,7 +1,4 @@
 using Avalonia;
-using Avalonia.Controls;
-using Avalonia.Threading;
-using System.ComponentModel;
 using ClassIsland.Core.Assists;
 using ClassIsland.Core.Abstractions.Controls;
 using ClassIsland.Core.Attributes;
@@ -9,93 +6,63 @@ using ClassIsland.Shared;
 using RhythmIsland.Abstractions;
 using RhythmIsland.Models;
 using RhythmIsland.Services;
+using RhythmIsland.Theming.Shared;
 
 namespace RhythmIsland.Controls.Components;
 
-[ComponentInfo("62E353BD-8D04-4BB1-8462-C1BC00497B7E", "律动岛频谱", "\ue768", "显示默认扬声器的实时频谱动画。")]
+[ComponentInfo("62E353BD-8D04-4BB1-8462-C1BC00497B7E", "律动岛频谱", "\ueff7", "显示默认扬声器的实时频谱动画。")]
 public partial class SpectrumComponent : ComponentBase<SpectrumComponentSettings>
 {
     private readonly ISpectrumFrameProvider _frames;
-    private readonly SpectrumComponentRefreshController _refreshController;
+    private readonly ISpectrumRenderClock _renderClock;
     private readonly ISystemMediaCoverService _mediaCoverService;
+    private readonly SpectrumDisplayCapabilityService _displayCapabilities;
     private readonly SpectrumAutoCollapseState _autoCollapse = new();
-    private long _displayRefreshCacheExpiresAt;
-    private int _cachedHigherFrameRate = 60;
-    private IDisposable? _mediaCoverLease;
+    private SpectrumVisualHostController? _visualHost;
 
     public SpectrumComponent() : this(
         IAppHost.GetService<ISpectrumFrameProvider>(),
         IAppHost.GetService<ISpectrumRenderClock>(),
-        IAppHost.GetService<ISystemMediaCoverService>())
+        IAppHost.GetService<ISystemMediaCoverService>(),
+        IAppHost.GetService<SpectrumDisplayCapabilityService>())
     {
     }
 
     internal SpectrumComponent(
         ISpectrumFrameProvider frames,
         ISpectrumRenderClock renderClock,
-        ISystemMediaCoverService mediaCoverService)
+        ISystemMediaCoverService mediaCoverService,
+        SpectrumDisplayCapabilityService? displayCapabilities = null)
     {
         InitializeComponent();
         _frames = frames;
+        _renderClock = renderClock;
         _mediaCoverService = mediaCoverService;
+        _displayCapabilities = displayCapabilities ?? new SpectrumDisplayCapabilityService();
         BarsControl.Initialize(frames);
-        _refreshController = new SpectrumComponentRefreshController(renderClock, OnRefreshTick,
-            ResolveEffectiveFrameRate);
     }
 
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs eventArgs)
     {
         base.OnAttachedToVisualTree(eventArgs);
-        BarsControl.SetComponentSettings(Settings);
-        Settings.PropertyChanged += OnComponentSettingsChanged;
-        _mediaCoverService.Changed += OnMediaCoverChanged;
-        RefreshMediaCoverSubscription();
         _autoCollapse.Reset();
-        _displayRefreshCacheExpiresAt = 0;
         IsVisible = true;
-        _refreshController.Attach();
+        _visualHost = new SpectrumVisualHostController(
+            this, BarsControl, Settings, _renderClock, _mediaCoverService, _displayCapabilities, UpdateAutoCollapse);
+        _visualHost.Attach();
     }
 
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs eventArgs)
     {
-        _refreshController.Detach();
-        Settings.PropertyChanged -= OnComponentSettingsChanged;
-        _mediaCoverService.Changed -= OnMediaCoverChanged;
-        _mediaCoverLease?.Dispose();
-        _mediaCoverLease = null;
-        BarsControl.SetMediaPalette(null);
+        _visualHost?.Dispose();
+        _visualHost = null;
         _autoCollapse.Reset();
         IsVisible = true;
         base.OnDetachedFromVisualTree(eventArgs);
     }
 
-    private int ResolveEffectiveFrameRate()
+    private void UpdateAutoCollapse()
     {
-        if (Settings.FrameRate is 30 or 60) return Settings.FrameRate;
-
-        var now = Environment.TickCount64;
-        if (now < _displayRefreshCacheExpiresAt) return _cachedHigherFrameRate;
-
-        _displayRefreshCacheExpiresAt = now + 1000;
-        try
-        {
-            var screen = TopLevel.GetTopLevel(this)?.Screens?.ScreenFromVisual(this);
-            var refreshRate = screen is null ? null : DisplayRefreshRateProvider.GetForBounds(screen.Bounds);
-            _cachedHigherFrameRate = SpectrumFrameRatePolicy.ResolveEffectiveFrameRate(Settings.FrameRate, refreshRate);
-            var persisted = SpectrumFrameRatePolicy.ResolvePersistedFrameRate(Settings.FrameRate, refreshRate);
-            if (persisted != Settings.FrameRate) Settings.FrameRate = persisted;
-        }
-        catch
-        {
-            _cachedHigherFrameRate = SpectrumFrameRatePolicy.ResolveEffectiveFrameRate(Settings.FrameRate, null);
-        }
-
-        return _cachedHigherFrameRate;
-    }
-
-    private void OnRefreshTick()
-    {
-        BarsControl.SetEffectiveFrameRate(ResolveEffectiveFrameRate());
         var collapsed = _autoCollapse.Update(
             _frames.Latest,
             Settings,
@@ -107,46 +74,5 @@ public partial class SpectrumComponent : ComponentBase<SpectrumComponentSettings
             IsVisible = !collapsed;
             InvalidateMeasure();
         }
-
-        BarsControl.InvalidateVisual();
-    }
-
-    private void OnComponentSettingsChanged(object? sender, PropertyChangedEventArgs eventArgs)
-    {
-        if (eventArgs.PropertyName == nameof(SpectrumComponentSettings.ColorSource))
-            RefreshMediaCoverSubscription();
-    }
-
-    private void RefreshMediaCoverSubscription()
-    {
-        if (Settings.ColorSource == SpectrumColorSource.MediaCover)
-        {
-            _mediaCoverLease ??= _mediaCoverService.Acquire();
-            ApplyMediaCoverState();
-            return;
-        }
-
-        _mediaCoverLease?.Dispose();
-        _mediaCoverLease = null;
-        BarsControl.SetMediaPalette(null);
-        Settings.SetMediaCoverStatusText("选择音乐封面后显示获取状态。");
-        BarsControl.InvalidateVisual();
-    }
-
-    private void OnMediaCoverChanged(object? sender, EventArgs eventArgs)
-    {
-        if (Settings.ColorSource != SpectrumColorSource.MediaCover) return;
-        Dispatcher.UIThread.Post(() =>
-        {
-            if (Settings.ColorSource == SpectrumColorSource.MediaCover && _mediaCoverLease is not null)
-                ApplyMediaCoverState();
-        }, DispatcherPriority.Render);
-    }
-
-    private void ApplyMediaCoverState()
-    {
-        BarsControl.SetMediaPalette(_mediaCoverService.CurrentPalette);
-        Settings.SetMediaCoverStatusText(_mediaCoverService.StatusText);
-        BarsControl.InvalidateVisual();
     }
 }

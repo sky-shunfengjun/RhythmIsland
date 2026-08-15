@@ -200,6 +200,55 @@ public sealed class RuntimeServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task SingleFlightReconnectRunsOneTrailingAttemptForRequestDuringRestart()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var firstRestartStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirstRestart = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var delays = new List<TimeSpan>();
+        var attempts = 0;
+        var active = 0;
+        var maximumActive = 0;
+        var coordinator = new SingleFlightReconnectCoordinator(
+            async _ =>
+            {
+                var currentActive = Interlocked.Increment(ref active);
+                maximumActive = Math.Max(maximumActive, currentActive);
+                var attempt = Interlocked.Increment(ref attempts);
+                try
+                {
+                    if (attempt == 1)
+                    {
+                        firstRestartStarted.SetResult();
+                        await releaseFirstRestart.Task;
+                    }
+                    return true;
+                }
+                finally
+                {
+                    Interlocked.Decrement(ref active);
+                }
+            },
+            cancellation.Token,
+            (delay, _) =>
+            {
+                delays.Add(delay);
+                return Task.CompletedTask;
+            });
+
+        Assert.True(coordinator.Request(TimeSpan.FromMilliseconds(100)));
+        await firstRestartStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.False(coordinator.Request(TimeSpan.FromMilliseconds(250)));
+        Assert.False(coordinator.Request(TimeSpan.FromMilliseconds(250)));
+        releaseFirstRestart.SetResult();
+        await coordinator.Completion.WaitAsync(TimeSpan.FromSeconds(2));
+
+        Assert.Equal(2, attempts);
+        Assert.Equal(1, maximumActive);
+        Assert.Equal([TimeSpan.FromMilliseconds(100), TimeSpan.FromMilliseconds(250)], delays);
+    }
+
+    [Fact]
     public void CaptureFaultLatchReportsOnlyFirstFailureUntilReset()
     {
         var latch = new CaptureFaultLatch();
@@ -232,9 +281,29 @@ public sealed class RuntimeServiceTests : IDisposable
         Assert.False(guard.IsCurrent(secondId, second));
     }
 
+    [Fact]
+    public void UnavailableDeviceClearsPreviousDeviceNameButKeepsLastError()
+    {
+        var status = new RuntimeStatus { DeviceName = "未连接" };
+        RhythmIslandRuntimeService.ApplyCaptureState(
+            status,
+            new AudioCaptureStateEventArgs(RuntimeState.Running, "测试扬声器"));
+        Assert.Equal("测试扬声器", status.DeviceName);
+
+        RhythmIslandRuntimeService.ApplyCaptureState(
+            status,
+            new AudioCaptureStateEventArgs(
+                RuntimeState.DeviceUnavailable,
+                null,
+                new InvalidOperationException("没有默认输出设备")));
+
+        Assert.Equal("未连接", status.DeviceName);
+        Assert.Equal("没有默认输出设备", status.LastError);
+    }
+
     private RhythmIslandRuntimeService CreateRuntime(FakeCapture capture, RhythmIslandSettingsStore store,
-        FakeAnalyzer? analyzer = null) =>
-        new(capture, analyzer ?? new FakeAnalyzer(), new SpectrumFrameProvider(), store, new RuntimeStatus(),
+        FakeAnalyzer? analyzer = null, RuntimeStatus? status = null) =>
+        new(capture, analyzer ?? new FakeAnalyzer(), new SpectrumFrameProvider(), store, status ?? new RuntimeStatus(),
             NullLogger<RhythmIslandRuntimeService>.Instance);
 
     private RhythmIslandSettingsStore CreateStore() => new(_folder, NullLogger<RhythmIslandSettingsStore>.Instance);
@@ -283,6 +352,11 @@ public sealed class RuntimeServiceTests : IDisposable
         }
 
         public void EmitSamples(float[] samples) => SamplesAvailable?.Invoke(this, new AudioSamplesEventArgs(samples, 48000));
+        public void EmitState(RuntimeState state, string? deviceName, Exception? error = null)
+        {
+            State = state;
+            StateChanged?.Invoke(this, new AudioCaptureStateEventArgs(state, deviceName, error));
+        }
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 

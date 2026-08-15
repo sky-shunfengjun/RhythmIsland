@@ -1,4 +1,18 @@
 <Styles xmlns="https://github.com/avaloniaui"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-    <!-- 独立主题骨架：当前不覆盖任何宿主样式或模板。 -->
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="using:ClassIsland.Controls">
+    <!-- 任意主界面行都可声明主题已启用，避免当前布局没有主要行时误报为未启用。 -->
+    <Style Selector="controls|MainWindowLine">
+        <Setter Property="Tag" Value="RhythmIsland.BackgroundTheme/v2" />
+    </Style>
+    <!-- 背景仍只交付给用户指定的主要行。 -->
+    <Style Selector="controls|MainWindowLine[IsMainLine=True]">
+        <!-- 插件识别到主题标记后会立即关闭此提示；只有主题时则保持显示。 -->
+        <Setter Property="ToolTip.Tip" Value="律动岛背景主题错误：未检测到律动岛插件，请先安装并启用插件。" />
+        <Setter Property="ToolTip.IsOpen" Value="True" />
+        <Setter Property="ToolTip.Placement" Value="Bottom" />
+        <Style Selector="^ /template/ Grid#PART_GridWrapper">
+            <Setter Property="Tag" Value="RhythmIsland.BackgroundBridge/v2" />
+        </Style>
+    </Style>
 </Styles>

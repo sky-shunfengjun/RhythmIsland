@@ -1,5 +1,6 @@
 bin/
 obj/
+**/AvaloniaUI/BuildServices/
 cipx/
 .vs/
 .vscode/

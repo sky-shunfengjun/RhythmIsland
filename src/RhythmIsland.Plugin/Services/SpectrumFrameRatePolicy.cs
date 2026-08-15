@@ -25,6 +25,6 @@ internal static class SpectrumFrameRatePolicy
         return displayRefreshRate!.Value + 0.5 >= configuredFrameRate ? configuredFrameRate : 60;
     }
 
-    private static bool IsReliable(double? refreshRate) =>
+    internal static bool IsReliable(double? refreshRate) =>
         refreshRate is { } value && double.IsFinite(value) && value > 1;
 }

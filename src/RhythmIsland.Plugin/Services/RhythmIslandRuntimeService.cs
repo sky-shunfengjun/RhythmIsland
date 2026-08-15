@@ -302,12 +302,18 @@ public sealed class RhythmIslandRuntimeService : IHostedService, IRhythmIslandRu
         }
     }
 
-    private void OnCaptureStateChanged(object? sender, AudioCaptureStateEventArgs eventArgs) => UpdateStatus(() =>
+    private void OnCaptureStateChanged(object? sender, AudioCaptureStateEventArgs eventArgs) =>
+        UpdateStatus(() => ApplyCaptureState(_status, eventArgs));
+
+    internal static void ApplyCaptureState(RuntimeStatus status, AudioCaptureStateEventArgs eventArgs)
     {
-        _status.State = eventArgs.State;
-        if (!string.IsNullOrWhiteSpace(eventArgs.DeviceName)) _status.DeviceName = eventArgs.DeviceName;
-        if (eventArgs.Error is not null) _status.LastError = eventArgs.Error.Message;
-    });
+        status.State = eventArgs.State;
+        if (!string.IsNullOrWhiteSpace(eventArgs.DeviceName))
+            status.DeviceName = eventArgs.DeviceName;
+        else if (eventArgs.State is RuntimeState.Starting or RuntimeState.Stopped or RuntimeState.DeviceUnavailable)
+            status.DeviceName = "未连接";
+        if (eventArgs.Error is not null) status.LastError = eventArgs.Error.Message;
+    }
 
     private void OnFrameProduced(object? sender, SpectrumFrame frame)
     {

@@ -22,6 +22,7 @@ public sealed class SystemMediaCoverService : ISystemMediaCoverService, IDisposa
     private readonly Func<bool> _apiAvailabilityProbe;
     private readonly Func<CancellationToken, Task<ISystemMediaSessionBackend>> _backendFactory;
     private ISystemMediaSessionBackend? _backend;
+    private CancellationTokenSource? _initializationCancellation;
     private CancellationTokenSource? _runCancellation;
     private CancellationTokenSource? _refreshCancellation;
     private Channel<long>? _refreshRequests;
@@ -95,33 +96,44 @@ public sealed class SystemMediaCoverService : ISystemMediaCoverService, IDisposa
 
     private void QueueLifecycle(bool shouldRun)
     {
+        CancellationTokenSource? initializationCancellation = null;
         lock (_sync)
         {
-            if (_disposed) shouldRun = false;
+            if (_disposed) return;
             _desiredRunning = shouldRun;
+            if (!shouldRun) initializationCancellation = _initializationCancellation;
             _lifecycleTask = _lifecycleTask.ContinueWith(
                 _ => ReconcileAsync(), CancellationToken.None,
                 TaskContinuationOptions.None, TaskScheduler.Default).Unwrap();
         }
+        initializationCancellation?.Cancel();
     }
 
     private async Task ReconcileAsync()
     {
-        bool shouldRun;
-        lock (_sync) shouldRun = _desiredRunning && !_disposed;
-        if (!shouldRun)
-        {
-            await StopCoreAsync();
-            return;
-        }
-
+        CancellationTokenSource? initializationCancellation;
         lock (_sync)
         {
-            if (_backend is not null)
+            if (!_desiredRunning || _disposed)
+            {
+                initializationCancellation = null;
+            }
+            else if (_backend is not null)
             {
                 RequestRefresh();
                 return;
             }
+            else
+            {
+                initializationCancellation = new CancellationTokenSource();
+                _initializationCancellation = initializationCancellation;
+            }
+        }
+
+        if (initializationCancellation is null)
+        {
+            await StopCoreAsync();
+            return;
         }
 
         SetState(SystemMediaCoverStatus.Starting, "正在获取 Windows 媒体封面…", null);
@@ -134,39 +146,67 @@ public sealed class SystemMediaCoverService : ISystemMediaCoverService, IDisposa
                 return;
             }
 
-            var backend = await _backendFactory(CancellationToken.None);
+            var backend = await _backendFactory(initializationCancellation.Token);
+            var publishBackend = false;
             lock (_sync)
             {
-                if (!_desiredRunning || _disposed)
+                if (!initializationCancellation.IsCancellationRequested &&
+                    _desiredRunning && !_disposed &&
+                    ReferenceEquals(_initializationCancellation, initializationCancellation))
                 {
-                    backend.Dispose();
-                    return;
+                    _backend = backend;
+                    _backend.Changed += OnBackendChanged;
+                    _runCancellation = new CancellationTokenSource();
+                    _refreshRequests = Channel.CreateBounded<long>(new BoundedChannelOptions(1)
+                    {
+                        FullMode = BoundedChannelFullMode.DropOldest,
+                        SingleReader = true,
+                        SingleWriter = false
+                    });
+                    _refreshTask = RunRefreshLoopAsync(
+                        _refreshRequests.Reader, backend, _runCancellation.Token);
+                    _initializationFailureLogged = false;
+                    publishBackend = true;
                 }
-
-                _backend = backend;
-                _backend.Changed += OnBackendChanged;
-                _runCancellation = new CancellationTokenSource();
-                _refreshRequests = Channel.CreateBounded<long>(new BoundedChannelOptions(1)
-                {
-                    FullMode = BoundedChannelFullMode.DropOldest,
-                    SingleReader = true,
-                    SingleWriter = false
-                });
-                _refreshTask = RunRefreshLoopAsync(
-                    _refreshRequests.Reader, backend, _runCancellation.Token);
-                _initializationFailureLogged = false;
+            }
+            if (!publishBackend)
+            {
+                backend.Dispose();
+                return;
             }
             RequestRefresh();
         }
+        catch (OperationCanceledException) when (initializationCancellation.IsCancellationRequested)
+        {
+        }
         catch (Exception exception)
         {
-            if (!_initializationFailureLogged)
+            var shouldReport = false;
+            lock (_sync)
             {
-                _initializationFailureLogged = true;
-                _logger.LogWarning(exception, "无法初始化 Windows 媒体封面服务，将使用主题色。");
+                if (_desiredRunning && !_disposed &&
+                    ReferenceEquals(_initializationCancellation, initializationCancellation))
+                {
+                    shouldReport = true;
+                    if (!_initializationFailureLogged)
+                    {
+                        _initializationFailureLogged = true;
+                        _logger.LogWarning(exception, "无法初始化 Windows 媒体封面服务，将使用主题色。");
+                    }
+                }
             }
-            SetState(SystemMediaCoverStatus.Faulted,
-                "当前无法获取媒体封面，正在使用主题色。", null);
+            if (shouldReport)
+                SetState(SystemMediaCoverStatus.Faulted,
+                    "当前无法获取媒体封面，正在使用主题色。", null);
+        }
+        finally
+        {
+            lock (_sync)
+            {
+                if (ReferenceEquals(_initializationCancellation, initializationCancellation))
+                    _initializationCancellation = null;
+            }
+            initializationCancellation.Dispose();
         }
     }
 
@@ -379,12 +419,24 @@ public sealed class SystemMediaCoverService : ISystemMediaCoverService, IDisposa
 
     public void Dispose()
     {
+        CancellationTokenSource? initializationCancellation;
+        CancellationTokenSource? refreshCancellation;
+        CancellationTokenSource? runCancellation;
+        Task lifecycleTask;
         lock (_sync)
         {
             if (_disposed) return;
             _disposed = true;
             _desiredRunning = false;
+            initializationCancellation = _initializationCancellation;
+            refreshCancellation = _refreshCancellation;
+            runCancellation = _runCancellation;
+            lifecycleTask = _lifecycleTask;
         }
+        initializationCancellation?.Cancel();
+        refreshCancellation?.Cancel();
+        runCancellation?.Cancel();
+        lifecycleTask.GetAwaiter().GetResult();
         StopCoreAsync().GetAwaiter().GetResult();
     }
 

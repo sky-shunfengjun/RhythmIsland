@@ -1,8 +1,11 @@
 id: rhythmisland.spectrum-background
-name: 律动岛 · 背景融合
-description: 律动岛的独立背景主题。当前仅为开发骨架，尚未发布。
-version: 0.1.0.0
+name: 律动岛-背景频谱
+description: 在 ClassIsland 主要行背景显示律动岛频谱；需要先安装并启用律动岛插件。
+version: 1.0.0.0
 author: sky-shunfengjun
 url: https://github.com/sky-shunfengjun/RhythmIsland
 banner: banner.png
-
+repoOwner: sky-shunfengjun
+repoName: RhythmIsland
+assetsRoot: main/src/RhythmIsland.Theme
+artifactName: RhythmIsland.Theme.zip

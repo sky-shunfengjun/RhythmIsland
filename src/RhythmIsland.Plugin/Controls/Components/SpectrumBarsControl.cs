@@ -17,17 +17,15 @@ public sealed class SpectrumBarsControl : Control
         AvaloniaProperty.Register<SpectrumBarsControl, IBrush?>(nameof(BarBrush));
 
     private ISpectrumFrameProvider? _frames;
-    private SpectrumComponentSettings? _componentSettings;
+    private SpectrumVisualSettings? _visualSettings;
     private BrushCacheKey? _brushCacheKey;
     private IBrush? _cachedBrush;
     private PaletteCacheKey? _paletteCacheKey;
     private IReadOnlyList<IBrush> _cachedBarPalette = [];
-    private int _barPalettePhaseBucket = -1;
     private LaserBrushCacheKey? _laserBrushCacheKey;
     private IBrush? _cachedLaserHighlightBrush;
     private LaserPaletteCacheKey? _laserPaletteCacheKey;
     private IReadOnlyList<IBrush> _cachedLaserHighlightPalette = [];
-    private int _laserPalettePhaseBucket = -1;
     private PenCacheKey? _penCacheKey;
     private Pen? _cachedCurvePen;
     private Pen? _cachedCurveHighlightPen;
@@ -35,15 +33,36 @@ public sealed class SpectrumBarsControl : Control
     private readonly double[] _curveHaloOpacities = new double[3];
     private readonly SpectrumFrameInterpolator _frameInterpolator = new();
     private readonly SpectrumPaletteTransition _paletteTransition = new();
+    private readonly SpectrumCurveGeometryCache _curveGeometryCache = new();
     private Rect[] _barRectangles = [];
-    private DateTimeOffset _animationEpoch = DateTimeOffset.UtcNow;
+    private TimeProvider _timeProvider = TimeProvider.System;
+    private DateTimeOffset _animationEpoch;
     private SpectrumPalette? _mediaPalette;
     private MediaPaletteCacheKey? _mediaPaletteCacheKey;
     private SpectrumPalette? _cachedProcessedMediaPalette;
+    private DirectPaletteCacheKey? _directPaletteCacheKey;
+    private SpectrumPalette? _cachedDirectPalette;
+    private SpectrumPalette? _lastResolvedPalette;
     private int _effectiveFrameRate = 30;
+
+    public SpectrumBarsControl() => _animationEpoch = _timeProvider.GetUtcNow();
 
     internal int ResampleBufferCapacity => _frameInterpolator.BufferCapacity;
     internal int BarRectangleBufferCapacity => _barRectangles.Length;
+    internal int CurvePointBufferCapacity => _curveGeometryCache.PointCapacity;
+    internal int CurveGeometryGeneration => _curveGeometryCache.GeometryGeneration;
+    internal Geometry CurveUpperGeometry => _curveGeometryCache.UpperGeometry;
+    internal Geometry CurveLowerGeometry => _curveGeometryCache.LowerGeometry;
+    internal Geometry CurveBottomFillGeometry => _curveGeometryCache.BottomFillGeometry;
+    internal Geometry CurveCenteredFillGeometry => _curveGeometryCache.CenteredFillGeometry;
+    internal SpectrumPalette? LastResolvedPalette => _lastResolvedPalette;
+    internal IBrush? CachedBrush => _cachedBrush;
+    internal IBrush? CachedLaserHighlightBrush => _cachedLaserHighlightBrush;
+    internal Pen? CachedCurvePen => _cachedCurvePen;
+    internal IReadOnlyList<IBrush> CachedBarPalette => _cachedBarPalette;
+    internal IReadOnlyList<IBrush> CachedLaserHighlightPalette => _cachedLaserHighlightPalette;
+    internal int BarPaletteUpdateCount { get; private set; }
+    internal int LaserPaletteUpdateCount { get; private set; }
 
     public IBrush? BarBrush
     {
@@ -53,19 +72,29 @@ public sealed class SpectrumBarsControl : Control
 
     internal void Initialize(ISpectrumFrameProvider frames) => _frames = frames;
 
-    internal void SetComponentSettings(SpectrumComponentSettings settings) => _componentSettings = settings;
+    internal void SetComponentSettings(SpectrumComponentSettings settings) => SetVisualSettings(settings);
+
+    internal void SetVisualSettings(SpectrumVisualSettings settings) => _visualSettings = settings;
 
     internal void SetMediaPalette(SpectrumPalette? palette) => _mediaPalette = palette;
 
     internal void SetEffectiveFrameRate(int frameRate) => _effectiveFrameRate = frameRate;
 
+    internal void SetTimeProvider(TimeProvider timeProvider)
+    {
+        ArgumentNullException.ThrowIfNull(timeProvider);
+        _timeProvider = timeProvider;
+        _animationEpoch = timeProvider.GetUtcNow();
+        _paletteTransition.Reset();
+    }
+
     public override void Render(DrawingContext context)
     {
         base.Render(context);
-        var componentSettings = _componentSettings;
+        var componentSettings = _visualSettings;
         if (componentSettings is null) return;
 
-        var now = DateTimeOffset.UtcNow;
+        var now = _timeProvider.GetUtcNow();
         var hostBrush = BarBrush ?? DefaultAccentBrush;
         var themeColor = hostBrush is ISolidColorBrush solidColorBrush
             ? solidColorBrush.Color
@@ -74,6 +103,7 @@ public sealed class SpectrumBarsControl : Control
         var paletteTransition = _paletteTransition.Resolve(targetPalette, now);
         var baseColor = paletteTransition.Primary;
         var gradientEndColor = paletteTransition.Secondary;
+        _lastResolvedPalette = paletteTransition;
         var dynamicPhase = componentSettings.GradientMode == SpectrumGradientMode.Dynamic
             ? SpectrumColorHelper.DynamicGradientPhase(componentSettings.GradientSpeed, now - _animationEpoch)
             : 0;
@@ -132,7 +162,7 @@ public sealed class SpectrumBarsControl : Control
     internal static Thickness ResolveSafetyPadding(SpectrumDisplayMode mode) =>
         mode == SpectrumDisplayMode.BottomUp ? new Thickness(1, 1, 1, 3) : default;
 
-    private SpectrumPalette ResolveTargetPalette(SpectrumComponentSettings settings, Color themeColor)
+    private SpectrumPalette ResolveTargetPalette(SpectrumVisualSettings settings, Color themeColor)
     {
         if (settings.ColorSource == SpectrumColorSource.MediaCover && _mediaPalette is { } mediaPalette)
         {
@@ -150,24 +180,25 @@ public sealed class SpectrumBarsControl : Control
         var secondary = settings.UseCustomGradientEndColor
             ? settings.GradientEndColor
             : SpectrumColorHelper.CreateAutomaticGradientEnd(primary);
-        return new SpectrumPalette(primary, secondary);
+        var directKey = new DirectPaletteCacheKey(primary, secondary);
+        if (_directPaletteCacheKey != directKey || _cachedDirectPalette is null)
+        {
+            _directPaletteCacheKey = directKey;
+            _cachedDirectPalette = new SpectrumPalette(primary, secondary);
+        }
+        return _cachedDirectPalette;
     }
 
     private IBrush ResolveBrush(
-        SpectrumComponentSettings settings,
+        SpectrumVisualSettings settings,
         Color baseColor,
         Color gradientEndColor,
         double dynamicPhase)
     {
-        var phaseBucket = settings.GradientMode == SpectrumGradientMode.Dynamic
-            ? (int)Math.Floor(dynamicPhase * 120)
-            : 0;
-        var key = new BrushCacheKey(settings.GradientMode, baseColor, gradientEndColor);
+        var key = new BrushCacheKey(settings.GradientMode);
         if (_brushCacheKey == key && _cachedBrush is not null)
         {
-            if (settings.GradientMode == SpectrumGradientMode.Dynamic &&
-                _cachedBrush is LinearGradientBrush dynamicBrush)
-                UpdateDynamicGradient(dynamicBrush, baseColor, gradientEndColor, dynamicPhase);
+            UpdateBrush(_cachedBrush, settings.GradientMode, baseColor, gradientEndColor, dynamicPhase);
             return _cachedBrush;
         }
 
@@ -188,15 +219,11 @@ public sealed class SpectrumBarsControl : Control
         SpectrumGradientMode mode,
         double dynamicPhase)
     {
-        var phaseBucket = mode == SpectrumGradientMode.Dynamic ? (int)Math.Floor(dynamicPhase * 120) : 0;
-        var key = new PaletteCacheKey(startColor, endColor, count, mode);
+        var key = new PaletteCacheKey(count, mode);
         if (_paletteCacheKey == key && _cachedBarPalette.Count == count)
         {
-            if (mode == SpectrumGradientMode.Dynamic && _barPalettePhaseBucket != phaseBucket)
-            {
-                UpdatePalette(_cachedBarPalette, startColor, endColor, dynamicPhase, 0);
-                _barPalettePhaseBucket = phaseBucket;
-            }
+            UpdatePalette(_cachedBarPalette, startColor, endColor, mode, dynamicPhase, 0);
+            BarPaletteUpdateCount++;
             return _cachedBarPalette;
         }
 
@@ -211,29 +238,26 @@ public sealed class SpectrumBarsControl : Control
         }
         _cachedBarPalette = brushes;
         _paletteCacheKey = key;
-        _barPalettePhaseBucket = phaseBucket;
+        BarPaletteUpdateCount++;
         return _cachedBarPalette;
     }
 
     private IBrush ResolveLaserHighlightBrush(
-        SpectrumComponentSettings settings,
+        SpectrumVisualSettings settings,
         Color startColor,
         Color endColor,
         double lightenAmount,
         double dynamicPhase)
     {
-        var phaseBucket = settings.GradientMode == SpectrumGradientMode.Dynamic
-            ? (int)Math.Floor(dynamicPhase * 120)
-            : 0;
-        var key = new LaserBrushCacheKey(settings.GradientMode, startColor, endColor, lightenAmount);
+        var key = new LaserBrushCacheKey(settings.GradientMode);
         if (_laserBrushCacheKey == key && _cachedLaserHighlightBrush is not null)
         {
-            if (settings.GradientMode == SpectrumGradientMode.Dynamic &&
-                _cachedLaserHighlightBrush is LinearGradientBrush dynamicBrush)
-                UpdateDynamicGradient(dynamicBrush,
-                    SpectrumColorHelper.Lighten(startColor, lightenAmount),
-                    SpectrumColorHelper.Lighten(endColor, lightenAmount),
-                    dynamicPhase);
+            UpdateBrush(
+                _cachedLaserHighlightBrush,
+                settings.GradientMode,
+                SpectrumColorHelper.Lighten(startColor, lightenAmount),
+                SpectrumColorHelper.Lighten(endColor, lightenAmount),
+                dynamicPhase);
             return _cachedLaserHighlightBrush;
         }
 
@@ -257,15 +281,12 @@ public sealed class SpectrumBarsControl : Control
         SpectrumGradientMode mode,
         double dynamicPhase)
     {
-        var phaseBucket = mode == SpectrumGradientMode.Dynamic ? (int)Math.Floor(dynamicPhase * 120) : 0;
-        var key = new LaserPaletteCacheKey(startColor, endColor, count, lightenAmount, mode);
+        var key = new LaserPaletteCacheKey(count, mode);
         if (_laserPaletteCacheKey == key && _cachedLaserHighlightPalette.Count == count)
         {
-            if (mode == SpectrumGradientMode.Dynamic && _laserPalettePhaseBucket != phaseBucket)
-            {
-                UpdatePalette(_cachedLaserHighlightPalette, startColor, endColor, dynamicPhase, lightenAmount);
-                _laserPalettePhaseBucket = phaseBucket;
-            }
+            UpdatePalette(
+                _cachedLaserHighlightPalette, startColor, endColor, mode, dynamicPhase, lightenAmount);
+            LaserPaletteUpdateCount++;
             return _cachedLaserHighlightPalette;
         }
 
@@ -281,8 +302,35 @@ public sealed class SpectrumBarsControl : Control
 
         _cachedLaserHighlightPalette = brushes;
         _laserPaletteCacheKey = key;
-        _laserPalettePhaseBucket = phaseBucket;
+        LaserPaletteUpdateCount++;
         return _cachedLaserHighlightPalette;
+    }
+
+    private static void UpdateBrush(
+        IBrush brush,
+        SpectrumGradientMode mode,
+        Color startColor,
+        Color endColor,
+        double dynamicPhase)
+    {
+        if (brush is SolidColorBrush solid)
+        {
+            solid.Color = startColor;
+            return;
+        }
+
+        if (brush is not LinearGradientBrush gradient) return;
+        if (mode == SpectrumGradientMode.Dynamic)
+        {
+            UpdateDynamicGradient(gradient, startColor, endColor, dynamicPhase);
+            return;
+        }
+
+        if (gradient.GradientStops.Count >= 2)
+        {
+            gradient.GradientStops[0].Color = startColor;
+            gradient.GradientStops[^1].Color = endColor;
+        }
     }
 
     private static LinearGradientBrush CreateDynamicGradient(Color startColor, Color endColor, double phase)
@@ -319,6 +367,7 @@ public sealed class SpectrumBarsControl : Control
         IReadOnlyList<IBrush> palette,
         Color startColor,
         Color endColor,
+        SpectrumGradientMode mode,
         double phase,
         double lightenAmount)
     {
@@ -326,7 +375,9 @@ public sealed class SpectrumBarsControl : Control
         {
             if (palette[index] is not SolidColorBrush brush) continue;
             var amount = palette.Count == 1 ? 0 : index / (double)(palette.Count - 1);
-            var color = SpectrumColorHelper.SampleDynamicGradient(startColor, endColor, amount, phase);
+            var color = mode == SpectrumGradientMode.Dynamic
+                ? SpectrumColorHelper.SampleDynamicGradient(startColor, endColor, amount, phase)
+                : SpectrumColorHelper.Interpolate(startColor, endColor, amount);
             brush.Color = lightenAmount > 0 ? SpectrumColorHelper.Lighten(color, lightenAmount) : color;
         }
     }
@@ -380,16 +431,15 @@ public sealed class SpectrumBarsControl : Control
         SpectrumLaserGlowParameters? laserGlow,
         IBrush? laserHighlightBrush)
     {
-        var points = SpectrumCurveLayout.Calculate(Bounds.Size, bands, mode, padding);
-        if (points.IsEmpty) return;
+        if (!_curveGeometryCache.Update(Bounds.Size, bands, mode, padding, includeFill: false)) return;
 
-        var upper = SpectrumCurveGeometryBuilder.CreateOpenCurve(points.Upper);
+        var upper = _curveGeometryCache.UpperGeometry;
         var lower = mode == SpectrumDisplayMode.Centered
-            ? SpectrumCurveGeometryBuilder.CreateOpenCurve(points.Lower)
+            ? _curveGeometryCache.LowerGeometry
             : null;
         if (laserGlow is { } laser && laserHighlightBrush is not null)
         {
-            using var clip = context.PushClip(points.DrawingBounds);
+            using var clip = context.PushClip(_curveGeometryCache.DrawingBounds);
             DrawLaserCurve(context, brush, laserHighlightBrush, upper, laser);
             if (lower is not null) DrawLaserCurve(context, brush, laserHighlightBrush, lower, laser);
             return;
@@ -410,22 +460,21 @@ public sealed class SpectrumBarsControl : Control
         SpectrumLaserGlowParameters? laserGlow,
         IBrush? laserHighlightBrush)
     {
-        var points = SpectrumCurveLayout.Calculate(Bounds.Size, bands, mode, padding);
-        if (points.IsEmpty) return;
+        if (!_curveGeometryCache.Update(Bounds.Size, bands, mode, padding, includeFill: true)) return;
 
         var fill = mode == SpectrumDisplayMode.Centered
-            ? SpectrumCurveGeometryBuilder.CreateCenteredFill(points.Upper, points.Lower)
-            : SpectrumCurveGeometryBuilder.CreateBottomFill(points.Upper, points.DrawingBounds);
+            ? _curveGeometryCache.CenteredFillGeometry
+            : _curveGeometryCache.BottomFillGeometry;
         using (context.PushOpacity(FillOpacity))
             context.DrawGeometry(brush, null, fill);
 
-        var upper = SpectrumCurveGeometryBuilder.CreateOpenCurve(points.Upper);
+        var upper = _curveGeometryCache.UpperGeometry;
         var lower = mode == SpectrumDisplayMode.Centered
-            ? SpectrumCurveGeometryBuilder.CreateOpenCurve(points.Lower)
+            ? _curveGeometryCache.LowerGeometry
             : null;
         if (laserGlow is { } laser && laserHighlightBrush is not null)
         {
-            using var clip = context.PushClip(points.DrawingBounds);
+            using var clip = context.PushClip(_curveGeometryCache.DrawingBounds);
             DrawLaserCurve(context, brush, laserHighlightBrush, upper, laser);
             if (lower is not null) DrawLaserCurve(context, brush, laserHighlightBrush, lower, laser);
             return;
@@ -519,7 +568,13 @@ public sealed class SpectrumBarsControl : Control
         IBrush? highlightBrush,
         SpectrumLaserGlowParameters? laser)
     {
-        var key = new PenCacheKey(bodyBrush, highlightBrush, laser);
+        var key = new PenCacheKey(
+            bodyBrush,
+            highlightBrush,
+            laser is not null,
+            laser?.OuterSpread ?? 0,
+            laser?.MiddleSpread ?? 0,
+            laser?.InnerSpread ?? 0);
         if (_penCacheKey != key || _cachedCurvePen is null)
         {
             _cachedCurvePen = new Pen(bodyBrush, CurveThickness);
@@ -537,32 +592,24 @@ public sealed class SpectrumBarsControl : Control
         return (_cachedCurvePen, _cachedCurveHighlightPen!, _cachedCurveHaloPens);
     }
 
-    private readonly record struct BrushCacheKey(
-        SpectrumGradientMode GradientMode,
-        Color StartColor,
-        Color EndColor);
+    private readonly record struct BrushCacheKey(SpectrumGradientMode GradientMode);
     private readonly record struct PaletteCacheKey(
-        Color StartColor,
-        Color EndColor,
         int Count,
         SpectrumGradientMode GradientMode);
-    private readonly record struct LaserBrushCacheKey(
-        SpectrumGradientMode GradientMode,
-        Color StartColor,
-        Color EndColor,
-        double LightenAmount);
+    private readonly record struct LaserBrushCacheKey(SpectrumGradientMode GradientMode);
     private readonly record struct LaserPaletteCacheKey(
-        Color StartColor,
-        Color EndColor,
         int Count,
-        double LightenAmount,
         SpectrumGradientMode GradientMode);
     private readonly record struct PenCacheKey(
         IBrush BodyBrush,
         IBrush? HighlightBrush,
-        SpectrumLaserGlowParameters? LaserGlow);
+        bool HasLaser,
+        double OuterSpread,
+        double MiddleSpread,
+        double InnerSpread);
     private readonly record struct MediaPaletteCacheKey(
         SpectrumPalette Palette,
         SpectrumMediaColorMode Mode,
         Color ThemeColor);
+    private readonly record struct DirectPaletteCacheKey(Color Primary, Color Secondary);
 }

@@ -5,10 +5,11 @@ using RhythmIsland.Models;
 using RhythmIsland.Abstractions;
 using RhythmIsland.Services;
 using RhythmIsland.ViewModels;
+using RhythmIsland.Theming.Background;
 
 namespace RhythmIsland.Views.SettingsPages;
 
-[SettingsPageInfo("rhythmisland.settings", "律动岛", "\ue768", "\ue768")]
+[SettingsPageInfo("rhythmisland.settings", "律动岛", "\ueff7", "\ueff7")]
 public partial class RhythmIslandSettingsPage : SettingsPageBase
 {
     public RhythmIslandSettingsPage()
@@ -17,6 +18,7 @@ public partial class RhythmIslandSettingsPage : SettingsPageBase
         var store = IAppHost.GetService<RhythmIslandSettingsStore>();
         var status = IAppHost.GetService<RuntimeStatus>();
         var runtime = IAppHost.GetService<IRhythmIslandRuntimeService>();
-        DataContext = new RhythmIslandSettingsPageViewModel(store.Settings, status, runtime);
+        var backgroundThemeStatus = IAppHost.GetService<BackgroundThemeStatus>();
+        DataContext = new RhythmIslandSettingsPageViewModel(store.Settings, status, runtime, backgroundThemeStatus);
     }
 }

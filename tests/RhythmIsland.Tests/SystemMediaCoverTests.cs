@@ -191,6 +191,92 @@ public sealed class SystemMediaCoverTests
         Assert.Equal(0, backend.ActiveReads);
     }
 
+    [Fact]
+    public async Task ReleasingLastLeaseCancelsBackendInitializationAndDoesNotFault()
+    {
+        var factoryStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var cancellationObserved = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var service = new SystemMediaCoverService(
+            NullLogger<SystemMediaCoverService>.Instance,
+            () => true,
+            async cancellationToken =>
+            {
+                factoryStarted.SetResult();
+                using var registration = cancellationToken.Register(() => cancellationObserved.TrySetResult());
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                throw new InvalidOperationException("不应完成初始化。");
+            });
+
+        var lease = service.Acquire();
+        await factoryStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        lease.Dispose();
+
+        await cancellationObserved.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await service.LifecycleTask.WaitAsync(TimeSpan.FromSeconds(2));
+
+        Assert.Equal(SystemMediaCoverStatus.Stopped, service.Status);
+        Assert.Null(service.CurrentPalette);
+    }
+
+    [Fact]
+    public async Task BackendReturnedAfterCancellationIsDisposedWithoutBeingPublished()
+    {
+        var factoryStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFactory = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var cancellationObserved = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var backend = new FakeMediaBackend((_, _) => Task.FromResult<byte[]?>(null));
+        using var service = new SystemMediaCoverService(
+            NullLogger<SystemMediaCoverService>.Instance,
+            () => true,
+            async cancellationToken =>
+            {
+                factoryStarted.SetResult();
+                using var registration = cancellationToken.Register(() => cancellationObserved.TrySetResult());
+                await releaseFactory.Task;
+                return backend;
+            });
+
+        var lease = service.Acquire();
+        await factoryStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        lease.Dispose();
+        await cancellationObserved.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        releaseFactory.SetResult();
+        await service.LifecycleTask.WaitAsync(TimeSpan.FromSeconds(2));
+
+        Assert.True(backend.IsDisposed);
+        Assert.Equal(0, backend.ReadCount);
+        Assert.Equal(SystemMediaCoverStatus.Stopped, service.Status);
+    }
+
+    [Fact]
+    public async Task DisposeCancelsBackendInitializationBeforeWaitingForShutdown()
+    {
+        var factoryStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var cancellationObserved = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var service = new SystemMediaCoverService(
+            NullLogger<SystemMediaCoverService>.Instance,
+            () => true,
+            async cancellationToken =>
+            {
+                factoryStarted.SetResult();
+                using var registration = cancellationToken.Register(() => cancellationObserved.TrySetResult());
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                throw new InvalidOperationException("不应完成初始化。");
+            });
+        var lease = service.Acquire();
+        await factoryStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+        var disposeTask = Task.Factory.StartNew(
+            service.Dispose,
+            CancellationToken.None,
+            TaskCreationOptions.LongRunning,
+            TaskScheduler.Default);
+        await cancellationObserved.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await disposeTask.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(SystemMediaCoverStatus.Stopped, service.Status);
+        lease.Dispose();
+    }
+
     private static byte[] CreateSolidImage(SKColor color)
     {
         using var bitmap = new SKBitmap(64, 64);
@@ -202,7 +288,8 @@ public sealed class SystemMediaCoverTests
 
     private static async Task WaitUntilAsync(Func<bool> predicate)
     {
-        var timeout = DateTime.UtcNow + TimeSpan.FromSeconds(2);
+        // 完整套件会并行执行 Avalonia 离屏渲染；给线程池调度留出余量，断言内容保持不变。
+        var timeout = DateTime.UtcNow + TimeSpan.FromSeconds(10);
         while (!predicate())
         {
             if (DateTime.UtcNow >= timeout) throw new TimeoutException();

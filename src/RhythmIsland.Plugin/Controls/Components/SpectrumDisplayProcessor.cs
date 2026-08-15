@@ -93,6 +93,8 @@ internal static class SpectrumDisplayProcessor
         var position = bandCount <= 1 ? 0 : Math.Clamp(bandIndex / (double)(bandCount - 1), 0, 1);
         var smoothPosition = position * position * (3 - 2 * position);
         var gain = Math.Pow(10, maximumGainDb * smoothPosition / 20);
+
+        // 有理软限制会保留高频提升，同时让较强信号平滑接近 1，避免大量柱体直接顶满。
         var balanced = value * gain / (1 + value * (gain - 1));
         return float.IsFinite((float)balanced) ? (float)Math.Clamp(balanced, 0, 1) : 0;
     }

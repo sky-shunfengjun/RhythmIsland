@@ -1,0 +1,87 @@
+<UserControl x:Class="RhythmIsland.Controls.Settings.SpectrumAppearanceSettingsControl"
+             xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ci="http://classisland.tech/schemas/xaml/core"
+             xmlns:fa="clr-namespace:FluentAvalonia.UI.Controls;assembly=FluentAvalonia"
+             xmlns:local="clr-namespace:RhythmIsland.Controls.Settings">
+    <StackPanel DataContext="{Binding RelativeSource={RelativeSource FindAncestor, AncestorType=local:SpectrumAppearanceSettingsControl}}">
+        <Separator Margin="0 4 0 8" />
+        <ci:IconText Glyph="&#xE51E;" Text="外观" Margin="0 0 0 8" />
+
+        <fa:SettingsExpander IconSource="{ci:FluentIconSource &#xEAAA;}" Header="显示样式" Description="选择频谱的显示样式。">
+            <fa:SettingsExpander.Footer>
+                <ComboBox Width="140" SelectedIndex="{Binding Settings.VisualizationStyleIndex, Mode=TwoWay}">
+                    <ComboBoxItem Content="柱状频谱" />
+                    <ComboBoxItem Content="平滑线条" />
+                    <ComboBoxItem Content="曲线填充" />
+                </ComboBox>
+            </fa:SettingsExpander.Footer>
+        </fa:SettingsExpander>
+
+        <fa:SettingsExpander IconSource="{ci:FluentIconSource &#xE09B;}" Header="频谱方向"
+                             Description="选择频谱从底部生长，或从中间向上下展开。" IsExpanded="True">
+            <fa:SettingsExpanderItem Content="底部向上">
+                <fa:SettingsExpanderItem.Footer><RadioButton GroupName="SpectrumDirection" IsChecked="{Binding Settings.IsBottomUpMode, Mode=TwoWay}" /></fa:SettingsExpanderItem.Footer>
+            </fa:SettingsExpanderItem>
+            <fa:SettingsExpanderItem Content="上下镜像">
+                <fa:SettingsExpanderItem.Footer><RadioButton GroupName="SpectrumDirection" IsChecked="{Binding Settings.IsCenteredMode, Mode=TwoWay}" /></fa:SettingsExpanderItem.Footer>
+            </fa:SettingsExpanderItem>
+        </fa:SettingsExpander>
+
+        <fa:SettingsExpander IconSource="{ci:FluentIconSource &#xE51E;}" Header="颜色与渐变"
+                             Description="跟随主题色、音乐封面或自选颜色；渐变可静态显示或动态流动。">
+            <fa:SettingsExpanderItem Content="颜色来源" Description="音乐封面不可用时会自动使用主题色。">
+                <fa:SettingsExpanderItem.Footer>
+                    <ComboBox Width="140" SelectedIndex="{Binding Settings.ColorSourceIndex, Mode=TwoWay}">
+                        <ComboBoxItem Content="主题色" />
+                        <ComboBoxItem Content="音乐封面（SMTC）" />
+                        <ComboBoxItem Content="自选颜色" />
+                    </ComboBox>
+                </fa:SettingsExpanderItem.Footer>
+            </fa:SettingsExpanderItem>
+            <fa:SettingsExpanderItem Content="主色" Description="频谱使用的主要颜色。" IsVisible="{Binding Settings.IsCustomColorSource}">
+                <fa:SettingsExpanderItem.Footer><ColorPicker Color="{Binding Settings.CustomColor, Mode=TwoWay}" /></fa:SettingsExpanderItem.Footer>
+            </fa:SettingsExpanderItem>
+            <fa:SettingsExpanderItem Content="第二色" Description="关闭自选时由插件自动生成。" IsVisible="{Binding Settings.CanCustomizeGradientEnd}">
+                <fa:SettingsExpanderItem.Footer>
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <ColorPicker IsVisible="{Binding Settings.UseCustomGradientEndColor}" Color="{Binding Settings.GradientEndColor, Mode=TwoWay}" />
+                        <ToggleSwitch IsChecked="{Binding Settings.UseCustomGradientEndColor, Mode=TwoWay}" />
+                    </StackPanel>
+                </fa:SettingsExpanderItem.Footer>
+            </fa:SettingsExpanderItem>
+            <fa:SettingsExpanderItem Content="封面状态" Description="{Binding Settings.MediaCoverStatusText}" IsVisible="{Binding Settings.IsMediaCoverColorSource}" />
+            <fa:SettingsExpanderItem Content="颜色模式" Description="鲜艳优先清晰；柔和降低刺激；偏色生成同色系配色。" IsVisible="{Binding Settings.IsMediaCoverColorSource}">
+                <fa:SettingsExpanderItem.Footer>
+                    <ComboBox Width="140" SelectedIndex="{Binding Settings.MediaCoverColorModeIndex, Mode=TwoWay}">
+                        <ComboBoxItem Content="鲜艳" /><ComboBoxItem Content="柔和" /><ComboBoxItem Content="偏色" />
+                    </ComboBox>
+                </fa:SettingsExpanderItem.Footer>
+            </fa:SettingsExpanderItem>
+            <fa:SettingsExpanderItem Content="渐变方式" Description="动态渐变会让颜色从左向右平滑流动。">
+                <fa:SettingsExpanderItem.Footer>
+                    <ComboBox Width="140" SelectedIndex="{Binding Settings.GradientModeIndex, Mode=TwoWay}">
+                        <ComboBoxItem Content="关闭" /><ComboBoxItem Content="静态渐变" /><ComboBoxItem Content="动态渐变" />
+                    </ComboBox>
+                </fa:SettingsExpanderItem.Footer>
+            </fa:SettingsExpanderItem>
+            <fa:SettingsExpanderItem Content="流动速度" Description="调整动态渐变完成一轮流动所需的时间。" IsVisible="{Binding Settings.IsDynamicGradient}">
+                <fa:SettingsExpanderItem.Footer>
+                    <ComboBox Width="140" SelectedIndex="{Binding Settings.GradientSpeedIndex, Mode=TwoWay}">
+                        <ComboBoxItem Content="慢速" /><ComboBoxItem Content="适中" /><ComboBoxItem Content="快速" />
+                    </ComboBox>
+                </fa:SettingsExpanderItem.Footer>
+            </fa:SettingsExpanderItem>
+        </fa:SettingsExpander>
+
+        <fa:SettingsExpander IconSource="{ci:FluentIconSource &#xE85F;}" Header="发光效果" Description="为频谱添加柔和光晕与宽亮部。">
+            <fa:SettingsExpander.Footer><ToggleSwitch IsChecked="{Binding Settings.GlowEnabled, Mode=TwoWay}" /></fa:SettingsExpander.Footer>
+            <fa:SettingsExpanderItem Content="发光强度" IsEnabled="{Binding Settings.GlowEnabled}">
+                <fa:SettingsExpanderItem.Footer>
+                    <Slider Width="240" Minimum="0.10" Maximum="1.00" TickFrequency="0.05" IsSnapToTickEnabled="True"
+                            Value="{Binding Settings.GlowIntensity, Mode=TwoWay}" ci:SliderDragTooltipAssist.StringFormat="F2" Classes="auto-tooltip" />
+                </fa:SettingsExpanderItem.Footer>
+            </fa:SettingsExpanderItem>
+        </fa:SettingsExpander>
+    </StackPanel>
+</UserControl>

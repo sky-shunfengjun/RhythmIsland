@@ -2,255 +2,44 @@
                         x:Class="RhythmIsland.Controls.Components.SpectrumComponentSettingsControl"
                         xmlns="https://github.com/avaloniaui"
                         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-                        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
-                        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
                         xmlns:ci="http://classisland.tech/schemas/xaml/core"
                         xmlns:fa="clr-namespace:FluentAvalonia.UI.Controls;assembly=FluentAvalonia"
                         xmlns:controls="clr-namespace:ClassIsland.Core.Abstractions.Controls;assembly=ClassIsland.Core"
                         xmlns:local="clr-namespace:RhythmIsland.Controls.Components"
-                        xmlns:models="clr-namespace:RhythmIsland.Models"
-                        mc:Ignorable="d">
+                        xmlns:settingsControls="clr-namespace:RhythmIsland.Controls.Settings"
+                        xmlns:models="clr-namespace:RhythmIsland.Models">
     <ScrollViewer>
         <StackPanel Classes="component-settings-container animated-intro"
                     DataContext="{Binding RelativeSource={RelativeSource FindAncestor, AncestorType=local:SpectrumComponentSettingsControl}}">
-            <Separator Margin="0 4 0 8" />
-            <ci:IconText Glyph="&#xE51E;" Text="外观" Margin="0 0 0 8" />
+            <settingsControls:SpectrumAppearanceSettingsControl Settings="{Binding Settings}" />
 
-            <fa:SettingsExpander IconSource="{ci:FluentIconSource &#xEAAA;}"
-                                 Header="显示样式"
-                                 Description="选择此组件频谱样式。">
-                <fa:SettingsExpander.Footer>
-                    <ComboBox Width="140"
-                              SelectedIndex="{Binding Settings.VisualizationStyleIndex, Mode=TwoWay}">
-                        <ComboBoxItem Content="柱状频谱" />
-                        <ComboBoxItem Content="平滑线条" />
-                        <ComboBoxItem Content="曲线填充" />
-                    </ComboBox>
-                </fa:SettingsExpander.Footer>
-            </fa:SettingsExpander>
-
-            <fa:SettingsExpander IconSource="{ci:FluentIconSource &#xE09B;}"
-                                 Header="频谱方向"
-                                 Description="选择频谱从底部生长，或从中间向上下展开。"
-                                 IsExpanded="True">
-                <fa:SettingsExpanderItem Content="底部向上">
+            <fa:SettingsExpander IconSource="{ci:FluentIconSource &#xEE83;}" Header="基础外观"
+                                 Description="调整此频谱组件的基础外观。" IsExpanded="True">
+                <fa:SettingsExpanderItem Content="不透明度" Description="此组件的不透明度。">
                     <fa:SettingsExpanderItem.Footer>
-                        <RadioButton GroupName="SpectrumDirection"
-                                     IsChecked="{Binding Settings.IsBottomUpMode, Mode=TwoWay}" />
+                        <Slider Width="240" Minimum="0.10" Maximum="1.00" TickFrequency="0.05" IsSnapToTickEnabled="True"
+                                Value="{Binding Settings.Opacity, Mode=TwoWay}" ci:SliderDragTooltipAssist.StringFormat="F2" Classes="auto-tooltip" />
                     </fa:SettingsExpanderItem.Footer>
                 </fa:SettingsExpanderItem>
-                <fa:SettingsExpanderItem Content="上下镜像">
+                <fa:SettingsExpanderItem Content="组件长度" Description="设置组件在主界面占用的横向宽度。">
                     <fa:SettingsExpanderItem.Footer>
-                        <RadioButton GroupName="SpectrumDirection"
-                                     IsChecked="{Binding Settings.IsCenteredMode, Mode=TwoWay}" />
+                        <Slider Width="240" Minimum="60" Maximum="1200" TickFrequency="10" IsSnapToTickEnabled="True"
+                                Value="{Binding Settings.Width, Mode=TwoWay}" Classes="auto-tooltip" />
                     </fa:SettingsExpanderItem.Footer>
                 </fa:SettingsExpanderItem>
             </fa:SettingsExpander>
 
-            <fa:SettingsExpander IconSource="{ci:FluentIconSource &#xE51E;}"
-                                 Header="颜色与渐变"
-                                 Description="跟随主题色、音乐封面或使用自选颜色来更改频谱颜色；渐变方式可选择静态或动态流动。">
-                <fa:SettingsExpanderItem Content="颜色来源"
-                                         Description="选择频谱颜色来源。（音乐封面不可用时会自动使用主题色）">
-                    <fa:SettingsExpanderItem.Footer>
-                        <ComboBox Width="140"
-                                  SelectedIndex="{Binding Settings.ColorSourceIndex, Mode=TwoWay}">
-                            <ComboBoxItem Content="主题色" />
-                            <ComboBoxItem Content="音乐封面（SMTC）" />
-                            <ComboBoxItem Content="自选颜色" />
-                        </ComboBox>
-                    </fa:SettingsExpanderItem.Footer>
-                </fa:SettingsExpanderItem>
-                <fa:SettingsExpanderItem Content="主色"
-                                         Description="此频谱组件的主要颜色。"
-                                         IsVisible="{Binding Settings.IsCustomColorSource}">
-                    <fa:SettingsExpanderItem.Footer>
-                        <ColorPicker Color="{Binding Settings.CustomColor, Mode=TwoWay}" />
-                    </fa:SettingsExpanderItem.Footer>
-                </fa:SettingsExpanderItem>
-                <fa:SettingsExpanderItem Content="第二色"
-                                         Description="此频谱组件的次要颜色，关闭时由插件自动生成。"
-                                         IsVisible="{Binding Settings.CanCustomizeGradientEnd}">
-                    <fa:SettingsExpanderItem.Footer>
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <ColorPicker IsVisible="{Binding Settings.UseCustomGradientEndColor}"
-                                         Color="{Binding Settings.GradientEndColor, Mode=TwoWay}" />
-                            <ToggleSwitch IsChecked="{Binding Settings.UseCustomGradientEndColor, Mode=TwoWay}" />
-                        </StackPanel>
-                    </fa:SettingsExpanderItem.Footer>
-                </fa:SettingsExpanderItem>
-                <fa:SettingsExpanderItem Content="封面状态"
-                                         Description="{Binding Settings.MediaCoverStatusText}"
-                                         IsVisible="{Binding Settings.IsMediaCoverColorSource}" />
-                <fa:SettingsExpanderItem Content="颜色模式"
-                                         Description="鲜艳优先保证清晰；柔和降低刺激感；偏色生成统一的同色系配色。"
-                                         IsVisible="{Binding Settings.IsMediaCoverColorSource}">
-                    <fa:SettingsExpanderItem.Footer>
-                        <ComboBox Width="140"
-                                  SelectedIndex="{Binding Settings.MediaCoverColorModeIndex, Mode=TwoWay}">
-                            <ComboBoxItem Content="鲜艳" />
-                            <ComboBoxItem Content="柔和" />
-                            <ComboBoxItem Content="偏色" />
-                        </ComboBox>
-                    </fa:SettingsExpanderItem.Footer>
-                </fa:SettingsExpanderItem>
-                <fa:SettingsExpanderItem Content="渐变方式"
-                                         Description="动态渐变会让颜色从左向右平滑流动。">
-                    <fa:SettingsExpanderItem.Footer>
-                        <ComboBox Width="140"
-                                  SelectedIndex="{Binding Settings.GradientModeIndex, Mode=TwoWay}">
-                            <ComboBoxItem Content="关闭" />
-                            <ComboBoxItem Content="静态渐变" />
-                            <ComboBoxItem Content="动态渐变" />
-                        </ComboBox>
-                    </fa:SettingsExpanderItem.Footer>
-                </fa:SettingsExpanderItem>
-                <fa:SettingsExpanderItem Content="流动速度"
-                                         Description="调整动态渐变完成一轮流动所需的时间。"
-                                         IsVisible="{Binding Settings.IsDynamicGradient}">
-                    <fa:SettingsExpanderItem.Footer>
-                        <ComboBox Width="140"
-                                  SelectedIndex="{Binding Settings.GradientSpeedIndex, Mode=TwoWay}">
-                            <ComboBoxItem Content="慢速" />
-                            <ComboBoxItem Content="适中" />
-                            <ComboBoxItem Content="快速" />
-                        </ComboBox>
-                    </fa:SettingsExpanderItem.Footer>
-                </fa:SettingsExpanderItem>
-            </fa:SettingsExpander>
-
-            <fa:SettingsExpander IconSource="{ci:FluentIconSource &#xE85F;}"
-                                 Header="发光效果"
-                                 Description="为频谱添加柔和光晕与宽亮部。">
-                <fa:SettingsExpander.Footer>
-                    <ToggleSwitch IsChecked="{Binding Settings.GlowEnabled, Mode=TwoWay}" />
-                </fa:SettingsExpander.Footer>
-                <fa:SettingsExpanderItem Content="发光强度"
-                                         IsEnabled="{Binding Settings.GlowEnabled}">
-                    <fa:SettingsExpanderItem.Footer>
-                        <Slider Width="240"
-                                Minimum="0.10"
-                                Maximum="1.00"
-                                TickFrequency="0.05"
-                                IsSnapToTickEnabled="True"
-                                Value="{Binding Settings.GlowIntensity, Mode=TwoWay}"
-                                ci:SliderDragTooltipAssist.StringFormat="F2"
-                                Classes="auto-tooltip" />
-                    </fa:SettingsExpanderItem.Footer>
-                </fa:SettingsExpanderItem>
-            </fa:SettingsExpander>
-
-            <fa:SettingsExpander IconSource="{ci:FluentIconSource &#xEE83;}"
-                                 Header="基础外观"
-                                 Description="调整此频谱组件的基础外观。"
-                                 IsExpanded="True">
-                <fa:SettingsExpanderItem Content="不透明度"
-                                         Description="此组件的不透明度。">
-                    <fa:SettingsExpanderItem.Footer>
-                        <Slider Width="240"
-                                Minimum="0.10"
-                                Maximum="1.00"
-                                TickFrequency="0.05"
-                                IsSnapToTickEnabled="True"
-                                Value="{Binding Settings.Opacity, Mode=TwoWay}"
-                                ci:SliderDragTooltipAssist.StringFormat="F2"
-                                Classes="auto-tooltip" />
-                    </fa:SettingsExpanderItem.Footer>
-                </fa:SettingsExpanderItem>
-                <fa:SettingsExpanderItem Content="组件长度"
-                                         Description="设置组件在主界面占用的横向宽度。">
-                    <fa:SettingsExpanderItem.Footer>
-                        <Slider Width="240"
-                                Minimum="60"
-                                Maximum="1200"
-                                TickFrequency="10"
-                                IsSnapToTickEnabled="True"
-                                Value="{Binding Settings.Width, Mode=TwoWay}"
-                                Classes="auto-tooltip" />
-                    </fa:SettingsExpanderItem.Footer>
-                </fa:SettingsExpanderItem>
-            </fa:SettingsExpander>
-
-            <Separator Margin="0 16 0 8" />
-            <ci:IconText Glyph="&#xEFF7;" Text="频谱" Margin="0 0 0 8" />
-
-            <fa:SettingsExpander IconSource="{ci:FluentIconSource &#xE5D1;}"
-                                 Header="细节数量"
-                                 Description="柱状时为柱数，曲线时为采样点数；数值越大，频率细节越丰富。">
-                <fa:SettingsExpander.Footer>
-                    <ComboBox Width="100"
-                              ItemsSource="{Binding Settings.AllowedBarCounts}"
-                              SelectedItem="{Binding Settings.BarCount, Mode=TwoWay}" />
-                </fa:SettingsExpander.Footer>
-            </fa:SettingsExpander>
-
-            <fa:SettingsExpander IconSource="{ci:FluentIconSource &#xE09B;}"
-                                 Header="中心镜像"
-                                 Description="将低频放在中间，高频向左右两侧对称展开。">
-                <fa:SettingsExpander.Footer>
-                    <ToggleSwitch IsChecked="{Binding Settings.HorizontalMirrorEnabled, Mode=TwoWay}" />
-                </fa:SettingsExpander.Footer>
-            </fa:SettingsExpander>
-
-            <fa:SettingsExpander IconSource="{ci:FluentIconSource &#xE9D9;}"
-                                 Header="频率均衡补偿"
-                                 Description="适当增强中高频，让频谱整体看起来更加均衡。">
-                <fa:SettingsExpander.Footer>
-                    <ComboBox Width="140"
-                              SelectedIndex="{Binding Settings.FrequencyBalanceModeIndex, Mode=TwoWay}">
-                        <ComboBoxItem Content="原始" />
-                        <ComboBoxItem Content="均衡" />
-                        <ComboBoxItem Content="突出高频" />
-                    </ComboBox>
-                </fa:SettingsExpander.Footer>
-            </fa:SettingsExpander>
-
-            <fa:SettingsExpander IconSource="{ci:FluentIconSource &#xEFF7;}"
-                                 Header="幅度"
-                                 Description="调整频谱对声音的显示高度。">
-                <fa:SettingsExpander.Footer>
-                    <Slider Width="240"
-                            Minimum="0.25"
-                            Maximum="3.00"
-                            TickFrequency="0.05"
-                            IsSnapToTickEnabled="True"
-                            Value="{Binding Settings.Amplitude, Mode=TwoWay}"
-                            ci:SliderDragTooltipAssist.StringFormat="F2"
-                            Classes="auto-tooltip" />
-                </fa:SettingsExpander.Footer>
-            </fa:SettingsExpander>
-
-            <fa:SettingsExpander IconSource="{ci:FluentIconSource &#xE8E1;}"
-                                 Header="刷新率"
-                                 Description="30 和 60 帧直接响应声音；更高档位会补充中间画面，也会增加资源占用。">
-                <fa:SettingsExpander.Footer>
-                    <ComboBox Width="120"
-                              ItemsSource="{Binding Settings.AvailableFrameRates}"
-                              DisplayMemberBinding="{Binding DisplayName}"
-                              SelectedValueBinding="{Binding Value}"
-                              SelectedValue="{Binding Settings.FrameRate, Mode=TwoWay}" />
-                </fa:SettingsExpander.Footer>
-            </fa:SettingsExpander>
+            <settingsControls:SpectrumFrequencySettingsControl Settings="{Binding Settings}" />
 
             <Separator Margin="0 16 0 8" />
             <ci:IconText Glyph="&#xEF27;" Text="功能" Margin="0 0 0 8" />
-
-            <fa:SettingsExpander IconSource="{ci:FluentIconSource &#xE817;}"
-                                 Header="无声自动收起"
+            <fa:SettingsExpander IconSource="{ci:FluentIconSource &#xE817;}" Header="无声自动收起"
                                  Description="一段时间没有声音后隐藏此组件，恢复声音时自动显示。">
-                <fa:SettingsExpander.Footer>
-                    <ToggleSwitch IsChecked="{Binding Settings.AutoCollapseEnabled, Mode=TwoWay}" />
-                </fa:SettingsExpander.Footer>
-                <fa:SettingsExpanderItem Content="等待时间"
-                                         Description="持续无声多久后收起。"
-                                         IsEnabled="{Binding Settings.AutoCollapseEnabled}">
+                <fa:SettingsExpander.Footer><ToggleSwitch IsChecked="{Binding Settings.AutoCollapseEnabled, Mode=TwoWay}" /></fa:SettingsExpander.Footer>
+                <fa:SettingsExpanderItem Content="等待时间" Description="持续无声多久后收起。" IsEnabled="{Binding Settings.AutoCollapseEnabled}">
                     <fa:SettingsExpanderItem.Footer>
                         <ci:Field Suffix="秒">
-                            <fa:NumberBox Width="170"
-                                          Minimum="1"
-                                          Maximum="120"
-                                          SmallChange="1"
-                                          SpinButtonPlacementMode="Inline"
+                            <fa:NumberBox Width="170" Minimum="1" Maximum="120" SmallChange="1" SpinButtonPlacementMode="Inline"
                                           Value="{Binding Settings.SilenceCollapseDelaySeconds, Mode=TwoWay}" />
                         </ci:Field>
                     </fa:SettingsExpanderItem.Footer>

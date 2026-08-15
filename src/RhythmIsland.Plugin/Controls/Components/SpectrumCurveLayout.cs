@@ -20,18 +20,34 @@ internal static class SpectrumCurveLayout
         SpectrumDisplayMode mode,
         Thickness padding = default)
     {
+        if (bands.Count == 0) return new SpectrumCurvePoints([], [], default);
+        var upper = new Point[bands.Count];
+        var lower = mode == SpectrumDisplayMode.Centered ? new Point[bands.Count] : [];
+        return CalculateInto(size, bands, mode, padding, upper, lower, out var bounds)
+            ? new SpectrumCurvePoints(upper, lower, bounds)
+            : new SpectrumCurvePoints([], [], default);
+    }
+
+    internal static bool CalculateInto(
+        Size size,
+        IReadOnlyList<float> bands,
+        SpectrumDisplayMode mode,
+        Thickness padding,
+        Span<Point> upper,
+        Span<Point> lower,
+        out Rect bounds)
+    {
+        bounds = default;
         if (!double.IsFinite(size.Width) || !double.IsFinite(size.Height) ||
-            size.Width <= 0 || size.Height <= 0 || bands.Count == 0)
-            return new SpectrumCurvePoints([], [], default);
+            size.Width <= 0 || size.Height <= 0 || bands.Count == 0 || upper.Length < bands.Count ||
+            (mode == SpectrumDisplayMode.Centered && lower.Length < bands.Count))
+            return false;
 
         var availableWidth = Math.Max(0, size.Width - padding.Left - padding.Right);
         var availableHeight = Math.Max(0, size.Height - padding.Top - padding.Bottom);
-        if (availableWidth <= 0 || availableHeight <= 0)
-            return new SpectrumCurvePoints([], [], default);
+        if (availableWidth <= 0 || availableHeight <= 0) return false;
 
-        var bounds = new Rect(padding.Left, padding.Top, availableWidth, availableHeight);
-        var upper = new Point[bands.Count];
-        var lower = mode == SpectrumDisplayMode.Centered ? new Point[bands.Count] : [];
+        bounds = new Rect(padding.Left, padding.Top, availableWidth, availableHeight);
         var centerY = bounds.Top + bounds.Height / 2;
 
         for (var index = 0; index < bands.Count; index++)
@@ -55,6 +71,6 @@ internal static class SpectrumCurveLayout
             }
         }
 
-        return new SpectrumCurvePoints(upper, lower, bounds);
+        return true;
     }
 }

@@ -2,6 +2,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using RhythmIsland.Abstractions;
 using RhythmIsland.Models;
+using RhythmIsland.Theming.Background;
 
 namespace RhythmIsland.ViewModels;
 
@@ -13,16 +14,19 @@ public sealed class RhythmIslandSettingsPageViewModel : ObservableObject
     public RhythmIslandSettingsPageViewModel(
         RhythmIslandSettings settings,
         RuntimeStatus status,
-        IRhythmIslandRuntimeService runtime)
+        IRhythmIslandRuntimeService runtime,
+        BackgroundThemeStatus backgroundThemeStatus)
     {
         Settings = settings;
         Status = status;
+        BackgroundThemeStatus = backgroundThemeStatus;
         _runtime = runtime;
         RestartCaptureCommand = new AsyncRelayCommand(RestartCaptureAsync);
     }
 
     public RhythmIslandSettings Settings { get; }
     public RuntimeStatus Status { get; }
+    public BackgroundThemeStatus BackgroundThemeStatus { get; }
     public IAsyncRelayCommand RestartCaptureCommand { get; }
 
     public string RestartCaptureMessage

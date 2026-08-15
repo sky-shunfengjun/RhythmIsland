@@ -8,6 +8,7 @@ namespace RhythmIsland.Services;
 public sealed class SpectrumRenderClock : ISpectrumRenderClock, IDisposable
 {
     private const int MaximumFrameRate = 240;
+    internal static readonly TimeSpan ErrorLogInterval = TimeSpan.FromSeconds(5);
     private static readonly long DispatchTolerance = Math.Max(1, Stopwatch.Frequency / 1000);
     private readonly HashSet<SubscriptionState> _subscribers = [];
     private readonly DispatcherTimer _timer;
@@ -48,16 +49,41 @@ public sealed class SpectrumRenderClock : ISpectrumRenderClock, IDisposable
         var now = Stopwatch.GetTimestamp();
         foreach (var subscription in _subscribers.ToArray())
         {
-            try
-            {
-                RefreshSubscriptionRate(subscription, now);
-                if (!ShouldDispatch(subscription, now)) continue;
-                subscription.Callback();
-                MarkDispatched(subscription, now);
-            }
-            catch (Exception exception) { _logger.LogError(exception, "刷新律动岛频谱组件失败。"); }
+            var exception = DispatchSubscription(subscription, now);
+            if (exception is not null && subscription.ShouldLogFailure(now))
+                _logger.LogError(exception, "刷新律动岛频谱组件失败。");
         }
         RefreshTimerInterval();
+    }
+
+    internal static Exception? DispatchSubscription(SubscriptionState subscription, long now)
+    {
+        var wasDue = ShouldDispatch(subscription, now);
+        try
+        {
+            RefreshSubscriptionRate(subscription, now);
+        }
+        catch (Exception exception)
+        {
+            if (wasDue) MarkDispatched(subscription, now);
+            return exception;
+        }
+
+        if (!ShouldDispatch(subscription, now)) return null;
+        try
+        {
+            subscription.Callback();
+            subscription.ResetFailureLog();
+            return null;
+        }
+        catch (Exception exception)
+        {
+            return exception;
+        }
+        finally
+        {
+            MarkDispatched(subscription, now);
+        }
     }
 
     internal static bool ShouldDispatch(SubscriptionState subscription, long now)
@@ -78,7 +104,6 @@ public sealed class SpectrumRenderClock : ISpectrumRenderClock, IDisposable
     {
         if (_subscribers.Count == 0) return;
         var now = Stopwatch.GetTimestamp();
-        foreach (var subscription in _subscribers) RefreshSubscriptionRate(subscription, now);
         var interval = DelayUntilNextDispatch(_subscribers, now);
         if (_timer.Interval != interval) _timer.Interval = interval;
     }
@@ -130,8 +155,19 @@ public sealed class SpectrumRenderClock : ISpectrumRenderClock, IDisposable
     {
         internal Action Callback { get; } = callback;
         internal Func<int> FrameRateProvider { get; } = frameRateProvider;
-        internal int EffectiveFrameRate { get; set; } = 30;
+        internal int EffectiveFrameRate { get; set; } = 60;
         internal long? NextDispatchTimestamp { get; set; }
+        internal long? LastFailureLogTimestamp { get; private set; }
+
+        internal bool ShouldLogFailure(long now)
+        {
+            var minimumTicks = (long)Math.Ceiling(ErrorLogInterval.TotalSeconds * Stopwatch.Frequency);
+            if (LastFailureLogTimestamp is { } last && now - last < minimumTicks) return false;
+            LastFailureLogTimestamp = now;
+            return true;
+        }
+
+        internal void ResetFailureLog() => LastFailureLogTimestamp = null;
     }
 
     private sealed class Subscription(SpectrumRenderClock owner, SubscriptionState subscription) : IDisposable

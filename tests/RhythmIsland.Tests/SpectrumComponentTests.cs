@@ -792,6 +792,17 @@ public sealed class SpectrumComponentTests
         SpectrumBarLayout.CalculateInto(new Size(240, 50), resampled,
             SpectrumDisplayMode.BottomUp, new Thickness(1, 1, 1, 3), actual);
         Assert.Equal(expected, actual);
+
+        var expectedCurve = SpectrumCurveLayout.Calculate(
+            new Size(240, 50), resampled, SpectrumDisplayMode.Centered);
+        var upper = new Point[48];
+        var lower = new Point[48];
+        Assert.True(SpectrumCurveLayout.CalculateInto(
+            new Size(240, 50), resampled, SpectrumDisplayMode.Centered,
+            default, upper, lower, out var curveBounds));
+        Assert.Equal(expectedCurve.DrawingBounds, curveBounds);
+        Assert.Equal(expectedCurve.Upper, upper);
+        Assert.Equal(expectedCurve.Lower, lower);
     }
 
     [Avalonia.Headless.XUnit.AvaloniaFact]
@@ -903,6 +914,92 @@ public sealed class SpectrumComponentTests
         var delay = SpectrumRenderClock.DelayUntilNextDispatch([sixty, seventyFive], now);
 
         Assert.Equal(1000d / 75d, delay.TotalMilliseconds, 2);
+    }
+
+    [Fact]
+    public void SharedClockAdvancesDeadlineWhenCallbackThrows()
+    {
+        const long now = 1_000_000;
+        var subscription = new SpectrumRenderClock.SubscriptionState(
+            () => throw new InvalidOperationException("render failed"),
+            () => 60)
+        {
+            EffectiveFrameRate = 60,
+            NextDispatchTimestamp = now
+        };
+
+        var exception = SpectrumRenderClock.DispatchSubscription(subscription, now);
+
+        Assert.IsType<InvalidOperationException>(exception);
+        Assert.True(subscription.NextDispatchTimestamp > now);
+        Assert.True(SpectrumRenderClock.DelayUntilNextDispatch([subscription], now) > TimeSpan.FromMilliseconds(10));
+    }
+
+    [Fact]
+    public void SharedClockKeepsLastRateAndAdvancesDeadlineWhenRateProviderThrows()
+    {
+        const long now = 1_000_000;
+        var callbackCount = 0;
+        var subscription = new SpectrumRenderClock.SubscriptionState(
+            () => callbackCount++,
+            () => throw new InvalidOperationException("rate failed"))
+        {
+            EffectiveFrameRate = 60,
+            NextDispatchTimestamp = now
+        };
+
+        var exception = SpectrumRenderClock.DispatchSubscription(subscription, now);
+
+        Assert.IsType<InvalidOperationException>(exception);
+        Assert.Equal(0, callbackCount);
+        Assert.Equal(60, subscription.EffectiveFrameRate);
+        Assert.True(subscription.NextDispatchTimestamp > now);
+    }
+
+    [Fact]
+    public void SharedClockIsolatesSubscribersAndRateLimitsPersistentErrors()
+    {
+        const long now = 1_000_000;
+        var healthyCount = 0;
+        var failing = new SpectrumRenderClock.SubscriptionState(
+            () => throw new InvalidOperationException("failed"), () => 60)
+        {
+            NextDispatchTimestamp = now
+        };
+        var healthy = new SpectrumRenderClock.SubscriptionState(() => healthyCount++, () => 60)
+        {
+            NextDispatchTimestamp = now
+        };
+
+        Assert.NotNull(SpectrumRenderClock.DispatchSubscription(failing, now));
+        Assert.Null(SpectrumRenderClock.DispatchSubscription(healthy, now));
+        Assert.Equal(1, healthyCount);
+        Assert.True(failing.ShouldLogFailure(now));
+        Assert.False(failing.ShouldLogFailure(now + Stopwatch.Frequency));
+        Assert.True(failing.ShouldLogFailure(now + Stopwatch.Frequency * 5));
+    }
+
+    [Fact]
+    public void SharedClockClearsErrorThrottleAfterSuccessfulCallback()
+    {
+        const long now = 1_000_000;
+        var shouldThrow = true;
+        var subscription = new SpectrumRenderClock.SubscriptionState(
+            () =>
+            {
+                if (shouldThrow) throw new InvalidOperationException("failed");
+            },
+            () => 60)
+        {
+            NextDispatchTimestamp = now
+        };
+
+        Assert.NotNull(SpectrumRenderClock.DispatchSubscription(subscription, now));
+        Assert.True(subscription.ShouldLogFailure(now));
+        shouldThrow = false;
+        var next = subscription.NextDispatchTimestamp!.Value;
+        Assert.Null(SpectrumRenderClock.DispatchSubscription(subscription, next));
+        Assert.True(subscription.ShouldLogFailure(next));
     }
 
     [Fact]

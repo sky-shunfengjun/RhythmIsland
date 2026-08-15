@@ -89,11 +89,14 @@ public sealed class WindowsAudioCaptureService : IAudioCaptureService, IMMNotifi
     {
         cancellationToken.ThrowIfCancellationRequested();
         DisposeCapture();
+        DeviceName = null;
+        string? selectedDeviceName = null;
         try
         {
             _device = _enumerator!.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
             Volatile.Write(ref _currentDeviceId, _device.ID);
-            DeviceName = _device.FriendlyName;
+            selectedDeviceName = _device.FriendlyName;
+            DeviceName = selectedDeviceName;
             var capture = new WasapiLoopbackCapture(_device);
             _capture = capture;
             var instanceId = _captureInstances.Begin(capture);
@@ -113,7 +116,8 @@ public sealed class WindowsAudioCaptureService : IAudioCaptureService, IMMNotifi
         {
             _logger.LogWarning(exception, "无法启动默认扬声器回环捕获。");
             DisposeCapture();
-            SetState(RuntimeState.DeviceUnavailable, null, exception);
+            DeviceName = selectedDeviceName;
+            SetState(RuntimeState.DeviceUnavailable, selectedDeviceName, exception);
             return false;
         }
     }
@@ -163,6 +167,7 @@ public sealed class WindowsAudioCaptureService : IAudioCaptureService, IMMNotifi
         try
         {
             if (_stopping || _runCancellation is null || cancellationToken != _runCancellation.Token) return true;
+            DeviceName = null;
             SetState(RuntimeState.Starting);
             return StartCaptureCore(cancellationToken);
         }
