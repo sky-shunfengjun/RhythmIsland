@@ -1,6 +1,6 @@
 # 律动岛 · RhythmIsland
 
-<img src="icon.png" alt="律动岛图标" width="128" height="128" />
+![律动岛图标](https://raw.githubusercontent.com/sky-shunfengjun/RhythmIsland/main/src/RhythmIsland.Plugin/icon.png)
 
 律动岛是面向 ClassIsland 2.x 的实时音频频谱组件插件。
 
