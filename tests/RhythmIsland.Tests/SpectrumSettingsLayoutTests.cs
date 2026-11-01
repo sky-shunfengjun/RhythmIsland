@@ -131,7 +131,7 @@ public sealed class SpectrumSettingsLayoutTests
         AssertExpanderIcon(plugin, "捕获诊断", '\uE9D9');
         AssertExpanderIcon(plugin, "隐私说明", '\uE946');
         AssertExpanderIcon(plugin, "背景频谱", '\uEFF7');
-        AssertExpanderIcon(plugin, "主题状态", '\uE82F');
+        AssertExpanderIcon(plugin, "背景状态", '\uE82F');
         AssertExpanderIcon(plugin, "基础外观", '\uEE83');
 
         AssertExpanderIcon(appearance, "显示样式", '\uEAAA');

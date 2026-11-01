@@ -15,7 +15,7 @@ public enum BackgroundThemeState
 public sealed class BackgroundThemeStatus : ObservableObject
 {
     private BackgroundThemeState _state = BackgroundThemeState.NotEnabled;
-    private string _statusText = "未启用配套背景主题。";
+    private string _statusText = "背景频谱尚未就绪。";
 
     public BackgroundThemeState State
     {

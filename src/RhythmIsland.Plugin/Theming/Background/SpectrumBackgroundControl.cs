@@ -72,7 +72,7 @@ internal sealed class SpectrumBackgroundControl : Grid
             }
             catch (Exception exception)
             {
-                logger.LogError(exception, "律动岛背景功能 {FeatureId} 启动失败，已仅停用该功能。", feature.Id);
+                logger.LogError(exception, "律动频谱背景功能 {FeatureId} 启动失败，已仅停用该功能。", feature.Id);
             }
         }
 

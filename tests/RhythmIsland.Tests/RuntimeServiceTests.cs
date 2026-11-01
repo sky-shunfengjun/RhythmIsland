@@ -42,6 +42,36 @@ public sealed class RuntimeServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task FirstInstallationStartsCaptureAsSoonAsApplicationIsReady()
+    {
+        var capture = new FakeCapture();
+        using var store = CreateStore();
+        using var runtime = CreateRuntime(capture, store);
+        runtime.MarkApplicationReady();
+        await runtime.CoordinationTask;
+        Assert.Equal(1, capture.StartCount);
+        Assert.Equal(1, capture.ActiveCount);
+        await runtime.StopAsync();
+    }
+
+    [Fact]
+    public async Task SavedDisabledCaptureDoesNotStartWithNewDefault()
+    {
+        using (var saved = CreateStore())
+        {
+            saved.Settings.IsEnabled = false;
+            saved.Save();
+        }
+        var capture = new FakeCapture();
+        using var store = CreateStore();
+        using var runtime = CreateRuntime(capture, store);
+        runtime.MarkApplicationReady();
+        await runtime.CoordinationTask;
+        Assert.Equal(0, capture.StartCount);
+        await runtime.StopAsync();
+    }
+
+    [Fact]
     public async Task RestartCaptureStopsThenStartsWithoutOverlap()
     {
         var capture = new FakeCapture();
@@ -65,6 +95,7 @@ public sealed class RuntimeServiceTests : IDisposable
     {
         var capture = new FakeCapture();
         using var store = CreateStore();
+        store.Settings.IsEnabled = false;
         using var runtime = CreateRuntime(capture, store);
 
         Assert.False(await runtime.RestartCaptureAsync());

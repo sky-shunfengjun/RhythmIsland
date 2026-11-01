@@ -19,7 +19,7 @@ public sealed class Plugin : PluginBase
 {
     public override void Initialize(HostBuilderContext context, IServiceCollection services)
     {
-        // 外部主题加载前注册 Avalonia 自带 Tag 的桥接监听；主题无需解析插件程序集类型。
+        // 在内置样式及历史外部主题加载前监听 Avalonia 自带的桥接标记。
         SpectrumThemeBridge.Register();
         services.AddSingleton(serviceProvider => new RhythmIslandSettingsStore(
             PluginConfigFolder,
@@ -33,6 +33,7 @@ public sealed class Plugin : PluginBase
         services.AddSingleton<SpectrumDisplayCapabilityService>();
         services.AddSingleton<BackgroundThemeStatus>();
         services.AddSingleton<SpectrumBackgroundHostService>();
+        services.AddSingleton<BackgroundBridgeStyleController>();
         services.AddHostedService<SpectrumThemeBridgeLifecycleService>();
         services.AddSingleton<RhythmIslandRuntimeService>();
         services.AddSingleton<IRhythmIslandRuntimeService>(provider => provider.GetRequiredService<RhythmIslandRuntimeService>());

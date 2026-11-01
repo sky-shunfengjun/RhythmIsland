@@ -10,7 +10,7 @@ public sealed class RhythmIslandSettings : ObservableObject
 {
     internal static readonly int[] AllowedBarCounts = [24, 32, 48, 64, 96];
 
-    private bool _isEnabled;
+    private bool _isEnabled = true;
     private double _sensitivity = 1.0;
     private double _smoothing = 0.65;
     private SpectrumBackgroundSettings _backgroundSpectrum = new();

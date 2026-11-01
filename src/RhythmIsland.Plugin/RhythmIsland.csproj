@@ -9,8 +9,8 @@
     <CreateCipx Condition="'$(Configuration)' != 'Release'">false</CreateCipx>
     <AssemblyName>RhythmIsland</AssemblyName>
     <RootNamespace>RhythmIsland</RootNamespace>
-    <Version>1.0.0.0</Version>
-    <FileVersion>1.0.0.0</FileVersion>
+    <Version>1.1.0.0</Version>
+    <FileVersion>1.1.0.0</FileVersion>
     <PackageLicenseExpression>GPL-3.0-or-later</PackageLicenseExpression>
   </PropertyGroup>
 
@@ -22,18 +22,33 @@
   <ItemGroup>
     <PackageReference Include="ClassIsland.PluginSdk" Version="2.1.0.1" ExcludeAssets="runtime;native" />
     <PackageReference Include="NAudio" Version="2.3.0" />
+    <PackageReference Include="Avalonia.Markup.Xaml.Loader" Version="11.3.17" />
   </ItemGroup>
 
   <ItemGroup>
+    <AvaloniaXaml Remove="Theming\Background\BackgroundBridgeStyles.axaml" />
+    <AvaloniaResource Remove="Theming\Background\BackgroundBridgeStyles.axaml" />
+    <EmbeddedResource Include="Theming\Background\BackgroundBridgeStyles.axaml" />
     <None Include="manifest.yml" CopyToOutputDirectory="PreserveNewest" />
-    <None Include="README.md" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="README.md" CopyToOutputDirectory="Never" />
+    <None Include="..\..\README.md" Link="README.md" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\LICENSE" Link="LICENSE" CopyToOutputDirectory="PreserveNewest" />
     <None Include="icon.png" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="banner.png" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="RhythmIsland.Tests" />
   </ItemGroup>
+
+  <!-- Loader 必须随插件提供；其余 Avalonia 使用宿主副本，避免隔离加载出第二套 UI 类型。 -->
+  <Target Name="RemoveHostAvaloniaCopies" AfterTargets="CopyFilesToOutputDirectory" BeforeTargets="CreateCipx">
+    <ItemGroup>
+      <HostAvaloniaCopies Include="$(TargetDir)Avalonia*.dll;$(TargetDir)Avalonia*.pdb;$(TargetDir)Avalonia*.xml"
+                          Exclude="$(TargetDir)Avalonia.Markup.Xaml.Loader.dll" />
+    </ItemGroup>
+    <Delete Files="@(HostAvaloniaCopies)" />
+  </Target>
 
   <Target Name="CopyCipxToRepositoryRoot" AfterTargets="CreateCipx"
           Condition="'$(Configuration)' == 'Release' and '$(CreateCipx)' == 'true'">

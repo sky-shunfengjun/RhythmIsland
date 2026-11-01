@@ -6,7 +6,7 @@ using RhythmIsland.Theming.Background;
 namespace RhythmIsland.Theming;
 
 /// <summary>
-/// 监听配套主题写入 Control.Tag 的主题存在标记与背景挂载标记。
+/// 监听内置样式或历史主题写入 Control.Tag 的背景存在标记与挂载标记。
 /// </summary>
 internal static class SpectrumThemeBridge
 {

@@ -10,7 +10,7 @@ using RhythmIsland.Theming.Shared;
 
 namespace RhythmIsland.Controls.Components;
 
-[ComponentInfo("62E353BD-8D04-4BB1-8462-C1BC00497B7E", "律动岛频谱", "\ueff7", "显示默认扬声器的实时频谱动画。")]
+[ComponentInfo("62E353BD-8D04-4BB1-8462-C1BC00497B7E", "律动频谱", "\ueff7", "显示默认扬声器的实时频谱动画。")]
 public partial class SpectrumComponent : ComponentBase<SpectrumComponentSettings>
 {
     private readonly ISpectrumFrameProvider _frames;

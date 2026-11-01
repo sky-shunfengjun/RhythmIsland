@@ -106,7 +106,7 @@ public sealed class RhythmIslandRuntimeService : IHostedService, IRhythmIslandRu
         }
         catch (Exception exception)
         {
-            _logger.LogError(exception, "协调律动岛运行状态失败。");
+            _logger.LogError(exception, "协调律动频谱运行状态失败。");
         }
     }
 
@@ -126,7 +126,7 @@ public sealed class RhythmIslandRuntimeService : IHostedService, IRhythmIslandRu
         }
         catch (Exception exception)
         {
-            _logger.LogError(exception, "启动律动岛运行服务失败。");
+            _logger.LogError(exception, "启动律动频谱运行服务失败。");
             await StopCoreAsync(CancellationToken.None);
             UpdateStatus(() => { _status.State = RuntimeState.Faulted; _status.LastError = exception.Message; });
         }
@@ -152,7 +152,7 @@ public sealed class RhythmIslandRuntimeService : IHostedService, IRhythmIslandRu
         }
         catch (Exception exception)
         {
-            _logger.LogError(exception, "重新启动律动岛捕获失败。");
+            _logger.LogError(exception, "重新启动律动频谱捕获失败。");
             await StopCoreAsync(CancellationToken.None);
             UpdateStatus(() => { _status.State = RuntimeState.Faulted; _status.LastError = exception.Message; });
             return false;
@@ -258,7 +258,7 @@ public sealed class RhythmIslandRuntimeService : IHostedService, IRhythmIslandRu
         }
         catch (Exception exception)
         {
-            _logger.LogError(exception, "律动岛频谱分析任务意外停止。");
+            _logger.LogError(exception, "律动频谱分析任务意外停止。");
             UpdateStatus(() =>
             {
                 _status.State = RuntimeState.Faulted;
@@ -298,7 +298,7 @@ public sealed class RhythmIslandRuntimeService : IHostedService, IRhythmIslandRu
         }
         catch (Exception cleanupException)
         {
-            _logger.LogError(cleanupException, "清理已故障的律动岛分析任务失败。");
+            _logger.LogError(cleanupException, "清理已故障的律动频谱分析任务失败。");
         }
     }
 

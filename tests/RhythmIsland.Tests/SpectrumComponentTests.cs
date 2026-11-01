@@ -811,7 +811,7 @@ public sealed class SpectrumComponentTests
         var info = typeof(SpectrumComponent).GetCustomAttribute<ComponentInfo>();
         Assert.NotNull(info);
         Assert.Equal(Guid.Parse("62E353BD-8D04-4BB1-8462-C1BC00497B7E"), info!.Guid);
-        Assert.Equal("律动岛频谱", info.Name);
+        Assert.Equal("律动频谱", info.Name);
     }
 
     [Fact]

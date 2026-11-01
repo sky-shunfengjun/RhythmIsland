@@ -1,31 +1,28 @@
-# 律动岛 · RhythmIsland
+# 律动频谱 · RhythmIsland
 
-<img src="src/RhythmIsland.Plugin/icon.png" alt="律动岛图标" width="128" height="128" />
+律动频谱是面向 ClassIsland 的实时音乐频谱插件：分析默认扬声器正在播放的声音，既可作为普通组件显示，也可直接显示在主界面主要行的背景中。
 
-律动岛是面向 ClassIsland 2.x 的实时音乐频谱项目：插件负责捕获默认扬声器的实时声音并显示频谱，配套主题可以把频谱放到 ClassIsland 主要行背景中。
+> 当前版本：`1.1.0.0`
 
-> 当前版本：`1.0.0.0 公开测试版`
+![律动频谱背景频谱效果预览](https://raw.githubusercontent.com/sky-shunfengjun/RhythmIsland/main/src/RhythmIsland.Plugin/banner.png)
 
-![律动岛主题效果预览](src/RhythmIsland.Theme/banner.png)
+首次安装后，声音捕获默认开启；可以在插件设置页随时关闭。更新插件时会保留你之前保存的开关状态。
 
 ## 快速开始
 
-### 安装插件
+### 使用主界面背景频谱
 
-从 [GitHub Releases](https://github.com/sky-shunfengjun/RhythmIsland/releases) 下载 `RhythmIsland.cipx`，在 ClassIsland 的插件设置中选择本地安装。
+在插件设置页中管理主界面背景频谱：
 
-安装后重启 ClassIsland，在“设置 → 插件 → 律动岛”中主动打开声音捕获，然后在编辑模式中添加“律动岛频谱”组件。
+1. 在 ClassIsland 主界面布局中设置一个主要行。
+2. 在律动频谱设置页确认声音捕获总开关已开启。
+3. 确认“背景频谱”已开启，并按需要调整背景颜色、样式和长度。
 
-### 安装配套背景主题
+### 使用普通频谱组件
 
-背景主题是可选的独立安装包。使用主题时：
+进入 ClassIsland 主界面编辑模式，添加“律动频谱”。每个组件都有独立设置，可以分别调整外观、频谱和无声自动收起，不会改变其他组件或背景的设置。
 
-1. 先安装并启用律动岛插件。
-2. 从 [GitHub Releases](https://github.com/sky-shunfengjun/RhythmIsland/releases) 下载 `RhythmIsland.Theme.zip` 并安装。
-3. 将主题放在 Fluent 或 Classic 之后加载。
-4. 在律动岛设置页打开“背景频谱”。
-
-主题不能替代插件，也不会自动打开声音捕获。
+中心镜像默认开启，低频位于中间。频率均衡补偿提供“原始”“均衡”和“突出高频”三档，默认“均衡”。组件默认在无声 5 秒后收起，编辑模式下保持可见；背景在无声时自然归零。
 
 ## 功能亮点
 
@@ -35,16 +32,34 @@
 - 支持鲜艳、柔和和偏色三种封面配色模式。
 - 支持静态渐变、动态渐变和发光效果。
 - 每个频谱组件都可以独立调整细节数量、幅度、长度、透明度、刷新率和无声自动收起。
-- 提供独立的配套背景主题，普通频谱组件和背景频谱共享同一套捕获与分析服务。
+- 内置主要行背景频谱，普通频谱组件和背景频谱共享同一套捕获与分析服务。
 
 ## 兼容范围
 
 - Windows 10/11 x64
-- ClassIsland 2.1.0.1
+- ClassIsland 2.1.0.1+
 
-## 当前限制
+## 兼容说明
 
-这是公开测试版。Fluent 和 Classic 是主要兼容目标，第三方主题、不同显示器之间切换、长期运行和较早 Windows 10 的 SMTC 降级路径仍建议继续反馈验证。
+Fluent 和 Classic 是主要兼容目标。第三方主题的背景显示取决于其界面结构；较早的 Windows 10 可能无法提供媒体封面，此时配色会回退到主题色。
+
+## 常见问题
+
+### 没有频谱，或主开关已打开但状态为停止
+
+确认声音捕获总开关已打开、系统存在默认扬声器，并且正在播放声音。背景频谱还需要设置主要行并打开“背景频谱”开关。仍未恢复时，可在插件设置页点击“重启捕获”，查看运行状态和最近错误。
+
+### 音乐封面取色不可用
+
+部分播放器或较早的 Windows 10 无法提供媒体封面，此时颜色会回退到 ClassIsland 主题色，声音频谱仍可使用。
+
+### 更新插件后没有变化
+
+安装、更新或卸载插件后，需要重启 ClassIsland 才会加载变更。
+
+## 隐私说明
+
+音频和媒体封面只在内存中实时处理，不保存、不上传，也不记录歌曲信息、播放历史或完整频谱历史。音乐封面仅用于取色，插件不控制播放器。
 
 ## 第三方依赖与致谢
 
@@ -52,6 +67,7 @@
 
 - [ClassIsland.PluginSdk 2.1.0.1](https://www.nuget.org/packages/ClassIsland.PluginSdk/2.1.0.1)：提供 ClassIsland 插件、组件和设置页接口；项目宿主为 [ClassIsland](https://github.com/ClassIsland/ClassIsland)。
 - [NAudio 2.3.0](https://www.nuget.org/packages/NAudio/2.3.0)：用于 Windows 默认扬声器的 WASAPI 回环捕获；源码位于 [NAudio/NAudio](https://github.com/naudio/NAudio)。
+- [Avalonia.Markup.Xaml.Loader 11.3.17](https://www.nuget.org/packages/Avalonia.Markup.Xaml.Loader/11.3.17)：加载插件内置的背景接入样式，其余 Avalonia 界面程序集由 ClassIsland 提供。
 
 界面和系统能力：
 
@@ -60,13 +76,13 @@
 
 测试使用 [xUnit](https://github.com/xunit/xunit) 和 [Avalonia Headless](https://github.com/AvaloniaUI/Avalonia) 进行自动化与离屏渲染验证。
 
-仓库首页效果图中的歌曲信息和封面来自 [MediaIsland](https://github.com/bywhite0/MediaIsland)，歌词来自 [ExtraIsland](https://github.com/LiPolymer/ExtraIsland)。这两个插件不是律动岛的运行依赖。
+仓库首页效果图中的歌曲信息和封面来自 [MediaIsland](https://github.com/bywhite0/MediaIsland)，歌词来自 [ExtraIsland](https://github.com/LiPolymer/ExtraIsland)。这两个插件不是律动频谱的运行依赖。
 
 本项目在需求、代码、测试和文档编写过程中使用了 AI 工具辅助，最终内容由项目作者审阅、修改和验证。
 
 ## 相关链接
 
-- [插件使用说明](src/RhythmIsland.Plugin/README.md)
-- [主题使用说明](src/RhythmIsland.Theme/README.md)
+- [项目主页](https://github.com/sky-shunfengjun/RhythmIsland)
 - [GitHub Releases](https://github.com/sky-shunfengjun/RhythmIsland/releases)
-- [GPL-3.0-or-later 许可证](LICENSE)
+- [问题反馈](https://github.com/sky-shunfengjun/RhythmIsland/issues)
+- [GPL-3.0-or-later 许可证](https://github.com/sky-shunfengjun/RhythmIsland/blob/main/LICENSE)

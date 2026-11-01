@@ -20,6 +20,7 @@ internal sealed class SpectrumBackgroundHostService
     private readonly ILogger<SpectrumBackgroundHostService> _logger;
     private readonly ConditionalWeakTable<Grid, SpectrumBackgroundControl> _mounted = new();
     private readonly ConditionalWeakTable<Border, SpectrumBackgroundControl> _legacyMounted = new();
+    private readonly ConditionalWeakTable<Border, object> _legacyCandidates = new();
     private readonly ConditionalWeakTable<Control, ThemePresenceEntry> _themePresence = new();
     private readonly ConditionalWeakTable<Control, ThemeProblemEntry> _themeProblems = new();
     private int _mountedCount;
@@ -27,6 +28,8 @@ internal sealed class SpectrumBackgroundHostService
     private int _themePresenceCount;
     private int _legacyThemePresenceCount;
     private bool _shutdown;
+    private bool _bridgeStyleApplied;
+    private bool _bridgeStyleFailed;
 
     public SpectrumBackgroundHostService(
         RhythmIslandSettingsStore settingsStore,
@@ -73,17 +76,18 @@ internal sealed class SpectrumBackgroundHostService
             host.DetachedFromVisualTree += OnHostDetachedFromVisualTree;
             _mounted.Add(host, control);
             _mountedCount++;
+            foreach (var pair in _legacyMounted.ToArray()) UnmountLegacy(pair.Key);
             ClearProblem(host);
             UpdateStatus();
             if (_mountedCount == 1)
-                _logger.LogInformation("配套背景主题已通过 v2 独立层挂载律动岛背景频谱。");
+                _logger.LogInformation("已通过 v2 独立层挂载律动频谱背景频谱。");
             return true;
         }
         catch (Exception exception)
         {
             ReportIncompatible(host, "无法在 Grid#PART_GridWrapper 中插入背景频谱层。");
             UpdateStatus();
-            _logger.LogError(exception, "挂载律动岛独立背景频谱层失败。");
+            _logger.LogError(exception, "挂载律动频谱独立背景频谱层失败。");
             return false;
         }
     }
@@ -91,6 +95,12 @@ internal sealed class SpectrumBackgroundHostService
     public bool AttachLegacy(Border border)
     {
         if (_shutdown) return false;
+        if (_mountedCount > 0)
+        {
+            RegisterLegacyCandidate(border);
+            ClearProblem(border);
+            return true;
+        }
         if (_legacyMounted.TryGetValue(border, out var existing))
         {
             if (ReferenceEquals(border.Child, existing))
@@ -108,7 +118,7 @@ internal sealed class SpectrumBackgroundHostService
         if (border.Child is not null)
         {
             ReportIncompatible(border, "v1 目标背景已有内容。");
-            _logger.LogWarning("检测到 v1 配套背景主题，但目标背景已有内容，律动岛没有覆盖它。");
+            _logger.LogWarning("检测到 v1 配套背景主题，但目标背景已有内容，律动频谱没有覆盖它。");
             return false;
         }
 
@@ -116,7 +126,7 @@ internal sealed class SpectrumBackgroundHostService
         {
             var control = CreateControl();
             border.Child = control;
-            border.DetachedFromVisualTree += OnHostDetachedFromVisualTree;
+            RegisterLegacyCandidate(border);
             _legacyMounted.Add(border, control);
             _legacyMountedCount++;
             ClearProblem(border);
@@ -129,7 +139,7 @@ internal sealed class SpectrumBackgroundHostService
         {
             ReportIncompatible(border, "无法挂载旧版 v1 背景频谱层。");
             UpdateStatus();
-            _logger.LogError(exception, "挂载旧版律动岛背景频谱失败。");
+            _logger.LogError(exception, "挂载旧版律动频谱背景频谱失败。");
             return false;
         }
     }
@@ -140,6 +150,13 @@ internal sealed class SpectrumBackgroundHostService
         Border border => _legacyMounted.TryGetValue(border, out _),
         _ => false
     };
+
+    internal void SetBridgeStyleState(bool applied, bool failed = false)
+    {
+        _bridgeStyleApplied = applied;
+        _bridgeStyleFailed = failed;
+        UpdateStatus();
+    }
 
     internal void RegisterThemePresence(Control control, int contractVersion)
     {
@@ -163,7 +180,7 @@ internal sealed class SpectrumBackgroundHostService
         ClearProblem(control);
         UpdateStatus();
         if (_themePresenceCount == 1)
-            _logger.LogInformation("已检测到律动岛配套背景主题 v{ContractVersion} 标记。", contractVersion);
+            _logger.LogInformation("已检测到律动频谱背景接入 v{ContractVersion} 标记。", contractVersion);
     }
 
     internal void RemoveControl(Control control)
@@ -173,7 +190,7 @@ internal sealed class SpectrumBackgroundHostService
             case Grid grid when IsMounted(grid):
                 Detach(grid);
                 break;
-            case Border border when IsMounted(border):
+            case Border border:
                 DetachLegacy(border);
                 break;
         }
@@ -191,23 +208,44 @@ internal sealed class SpectrumBackgroundHostService
         control.Release();
         _mounted.Remove(host);
         _mountedCount = Math.Max(0, _mountedCount - 1);
+        if (_mountedCount == 0 && !_shutdown)
+        {
+            foreach (var pair in _legacyCandidates.ToArray())
+            {
+                if (Equals(pair.Key.Tag, SpectrumThemeBridge.LegacyBridgeMarker)) AttachLegacy(pair.Key);
+                else DetachLegacy(pair.Key);
+            }
+        }
         UpdateStatus();
         if (hadAnyMount && TotalMountedCount == 0)
-            _logger.LogInformation("律动岛背景频谱已从配套主题卸载。");
+            _logger.LogInformation("律动频谱背景频谱已卸载。");
     }
 
     public void DetachLegacy(Border border)
     {
+        border.DetachedFromVisualTree -= OnHostDetachedFromVisualTree;
+        _legacyCandidates.Remove(border);
+        UnmountLegacy(border);
+    }
+
+    private void RegisterLegacyCandidate(Border border)
+    {
+        if (_legacyCandidates.TryGetValue(border, out _)) return;
+        _legacyCandidates.Add(border, new object());
+        border.DetachedFromVisualTree += OnHostDetachedFromVisualTree;
+    }
+
+    private void UnmountLegacy(Border border)
+    {
         if (!_legacyMounted.TryGetValue(border, out var control)) return;
         var hadAnyMount = TotalMountedCount > 0;
-        border.DetachedFromVisualTree -= OnHostDetachedFromVisualTree;
         if (ReferenceEquals(border.Child, control)) border.Child = null;
         control.Release();
         _legacyMounted.Remove(border);
         _legacyMountedCount = Math.Max(0, _legacyMountedCount - 1);
         UpdateStatus();
         if (hadAnyMount && TotalMountedCount == 0)
-            _logger.LogInformation("律动岛背景频谱已从配套主题卸载。");
+            _logger.LogInformation("律动频谱背景频谱已卸载。");
     }
 
     public void ReportContractMismatch(Control control, string requestedVersion)
@@ -218,7 +256,7 @@ internal sealed class SpectrumBackgroundHostService
         if (shouldLog)
         {
             _logger.LogWarning(
-                "律动岛配套主题桥接版本不匹配：主题请求 {RequestedVersion}，插件支持 v1 和 v{SupportedVersion}。",
+                "律动频谱配套主题桥接版本不匹配：主题请求 {RequestedVersion}，插件支持 v1 和 v{SupportedVersion}。",
                 requestedVersion,
                 SpectrumThemeBridge.CurrentContractVersion);
         }
@@ -239,10 +277,13 @@ internal sealed class SpectrumBackgroundHostService
         _settingsStore.Settings.BackgroundSpectrum.PropertyChanged -= OnBackgroundSettingsChanged;
         foreach (var pair in _mounted.ToArray()) Detach(pair.Key);
         foreach (var pair in _legacyMounted.ToArray()) DetachLegacy(pair.Key);
+        foreach (var pair in _legacyCandidates.ToArray()) DetachLegacy(pair.Key);
         foreach (var pair in _themePresence.ToArray()) RemoveThemePresence(pair.Key, pair.Value);
         foreach (var pair in _themeProblems.ToArray()) ClearProblem(pair.Key);
         _themePresenceCount = 0;
         _legacyThemePresenceCount = 0;
+        _bridgeStyleApplied = false;
+        _bridgeStyleFailed = false;
         UpdateStatus();
     }
 
@@ -338,29 +379,36 @@ internal sealed class SpectrumBackgroundHostService
 
         if (_themeProblems.Any(pair => pair.Value.Kind == ThemeProblemKind.Incompatible))
         {
-            _status.Set(BackgroundThemeState.Incompatible, "当前主题结构不兼容，律动岛没有覆盖原有界面内容。");
+            _status.Set(BackgroundThemeState.Incompatible, "当前主题结构不兼容，律动频谱没有覆盖原有界面内容。");
             return;
         }
 
-        if (_themePresenceCount > 0)
+        if (_bridgeStyleFailed)
+        {
+            _status.Set(BackgroundThemeState.Incompatible,
+                "背景频谱暂时无法加载，请重启 ClassIsland；仍有问题时请更新插件并查看日志。普通频谱组件仍可使用。");
+            return;
+        }
+
+        if (_themePresenceCount > 0 || _bridgeStyleApplied)
         {
             if (!_settingsStore.Settings.BackgroundSpectrum.IsEnabled)
-                _status.Set(BackgroundThemeState.DisabledByUser, "配套主题已启用，背景频谱已关闭。");
-            else if (_legacyThemePresenceCount == _themePresenceCount)
+                _status.Set(BackgroundThemeState.DisabledByUser, "背景频谱已关闭。");
+            else if (!_bridgeStyleApplied && _legacyThemePresenceCount == _themePresenceCount)
                 _status.Set(BackgroundThemeState.EnabledWaiting, "旧版配套主题已启用，正在等待主要行背景；建议更新主题以支持独立透明度。");
             else
-                _status.Set(BackgroundThemeState.EnabledWaiting, "配套主题已启用，正在等待主要行背景；请先设置一个主要行。");
+                _status.Set(BackgroundThemeState.EnabledWaiting, "背景频谱已就绪，正在等待主要行；请在主界面布局中设置一个主要行。");
             return;
         }
 
-        _status.Set(BackgroundThemeState.NotEnabled, "未启用配套背景主题。");
+        _status.Set(BackgroundThemeState.NotEnabled, "背景频谱尚未就绪。");
     }
 
     private void SetMountedStatus(bool legacy)
     {
         if (!_settingsStore.Settings.BackgroundSpectrum.IsEnabled)
         {
-            _status.Set(BackgroundThemeState.DisabledByUser, "配套主题已启用，背景频谱已关闭。");
+            _status.Set(BackgroundThemeState.DisabledByUser, "背景频谱已关闭。");
             return;
         }
 
@@ -368,7 +416,7 @@ internal sealed class SpectrumBackgroundHostService
             BackgroundThemeState.Displaying,
             legacy
                 ? "配套背景主题正在显示频谱；当前主题版本较旧，建议更新以支持独立透明度。"
-                : "配套背景主题正在主要行显示频谱。");
+                : "背景频谱已接入主要行，声音捕获开启并有声音时显示。");
     }
 
     internal void ClearProblem(Control control)

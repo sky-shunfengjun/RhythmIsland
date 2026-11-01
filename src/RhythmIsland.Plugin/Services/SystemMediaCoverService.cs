@@ -22,9 +22,9 @@ public sealed class SystemMediaCoverService : ISystemMediaCoverService, IDisposa
     private readonly Func<bool> _apiAvailabilityProbe;
     private readonly Func<CancellationToken, Task<ISystemMediaSessionBackend>> _backendFactory;
     private ISystemMediaSessionBackend? _backend;
-    private CancellationTokenSource? _initializationCancellation;
-    private CancellationTokenSource? _runCancellation;
-    private CancellationTokenSource? _refreshCancellation;
+    private CancellationLifetime? _initializationCancellation;
+    private CancellationLifetime? _runCancellation;
+    private CancellationLifetime? _refreshCancellation;
     private Channel<long>? _refreshRequests;
     private Task _refreshTask = Task.CompletedTask;
     private Task _lifecycleTask = Task.CompletedTask;
@@ -96,7 +96,7 @@ public sealed class SystemMediaCoverService : ISystemMediaCoverService, IDisposa
 
     private void QueueLifecycle(bool shouldRun)
     {
-        CancellationTokenSource? initializationCancellation = null;
+        CancellationLifetime? initializationCancellation = null;
         lock (_sync)
         {
             if (_disposed) return;
@@ -111,7 +111,8 @@ public sealed class SystemMediaCoverService : ISystemMediaCoverService, IDisposa
 
     private async Task ReconcileAsync()
     {
-        CancellationTokenSource? initializationCancellation;
+        CancellationLifetime? initializationCancellation;
+        var refreshExistingBackend = false;
         lock (_sync)
         {
             if (!_desiredRunning || _disposed)
@@ -120,14 +121,20 @@ public sealed class SystemMediaCoverService : ISystemMediaCoverService, IDisposa
             }
             else if (_backend is not null)
             {
-                RequestRefresh();
-                return;
+                initializationCancellation = null;
+                refreshExistingBackend = true;
             }
             else
             {
-                initializationCancellation = new CancellationTokenSource();
+                initializationCancellation = new CancellationLifetime();
                 _initializationCancellation = initializationCancellation;
             }
+        }
+
+        if (refreshExistingBackend)
+        {
+            RequestRefresh();
+            return;
         }
 
         if (initializationCancellation is null)
@@ -156,7 +163,7 @@ public sealed class SystemMediaCoverService : ISystemMediaCoverService, IDisposa
                 {
                     _backend = backend;
                     _backend.Changed += OnBackendChanged;
-                    _runCancellation = new CancellationTokenSource();
+                    _runCancellation = new CancellationLifetime();
                     _refreshRequests = Channel.CreateBounded<long>(new BoundedChannelOptions(1)
                     {
                         FullMode = BoundedChannelFullMode.DropOldest,
@@ -226,16 +233,15 @@ public sealed class SystemMediaCoverService : ISystemMediaCoverService, IDisposa
 
     private void RequestRefresh()
     {
-        Channel<long>? requests;
-        long version;
+        CancellationLifetime? refreshCancellation;
         lock (_sync)
         {
             if (!_desiredRunning || _disposed || _backend is null || _refreshRequests is null) return;
-            version = ++_refreshVersion;
-            _refreshCancellation?.Cancel();
-            requests = _refreshRequests;
+            var version = ++_refreshVersion;
+            refreshCancellation = _refreshCancellation;
+            _refreshRequests.Writer.TryWrite(version);
         }
-        requests.Writer.TryWrite(version);
+        refreshCancellation?.Cancel();
     }
 
     private async Task RunRefreshLoopAsync(
@@ -250,7 +256,7 @@ public sealed class SystemMediaCoverService : ISystemMediaCoverService, IDisposa
                 if (!reader.TryRead(out var version)) continue;
                 while (reader.TryRead(out var newerVersion)) version = newerVersion;
 
-                using var operation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                using var operation = CancellationLifetime.CreateLinked(cancellationToken);
                 lock (_sync) _refreshCancellation = operation;
                 await RefreshOnceAsync(backend, version, operation.Token);
                 lock (_sync)
@@ -369,8 +375,8 @@ public sealed class SystemMediaCoverService : ISystemMediaCoverService, IDisposa
 
     private async Task StopCoreAsync()
     {
-        CancellationTokenSource? runCancellation;
-        CancellationTokenSource? refreshCancellation;
+        CancellationLifetime? runCancellation;
+        CancellationLifetime? refreshCancellation;
         Channel<long>? requests;
         Task refreshTask;
         ISystemMediaSessionBackend? backend;
@@ -419,9 +425,9 @@ public sealed class SystemMediaCoverService : ISystemMediaCoverService, IDisposa
 
     public void Dispose()
     {
-        CancellationTokenSource? initializationCancellation;
-        CancellationTokenSource? refreshCancellation;
-        CancellationTokenSource? runCancellation;
+        CancellationLifetime? initializationCancellation;
+        CancellationLifetime? refreshCancellation;
+        CancellationLifetime? runCancellation;
         Task lifecycleTask;
         lock (_sync)
         {

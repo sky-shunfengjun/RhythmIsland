@@ -51,7 +51,7 @@ public sealed class SpectrumRenderClock : ISpectrumRenderClock, IDisposable
         {
             var exception = DispatchSubscription(subscription, now);
             if (exception is not null && subscription.ShouldLogFailure(now))
-                _logger.LogError(exception, "刷新律动岛频谱组件失败。");
+                _logger.LogError(exception, "刷新律动频谱组件失败。");
         }
         RefreshTimerInterval();
     }

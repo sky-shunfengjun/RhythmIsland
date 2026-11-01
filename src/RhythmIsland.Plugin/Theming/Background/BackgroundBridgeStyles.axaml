@@ -1,0 +1,11 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="using:ClassIsland.Controls">
+    <!-- 所有行声明接入已就绪；只有主要行获得背景频谱。 -->
+    <Style Selector="controls|MainWindowLine">
+        <Setter Property="Tag" Value="RhythmIsland.BackgroundTheme/v2" />
+    </Style>
+    <Style Selector="controls|MainWindowLine[IsMainLine=True] /template/ Grid#PART_GridWrapper">
+        <Setter Property="Tag" Value="RhythmIsland.BackgroundBridge/v2" />
+    </Style>
+</Styles>

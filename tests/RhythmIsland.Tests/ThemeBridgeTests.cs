@@ -1,6 +1,7 @@
 using System.Xml.Linq;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Templates;
 using Avalonia.Data;
 using Avalonia.Headless.XUnit;
 using Avalonia.Media;
@@ -25,7 +26,8 @@ public sealed class ThemeBridgeTests
     [Fact]
     public void ThemeUsesMainLineSelectorAndStableBridgeWithoutReplacingTemplate()
     {
-        var themePath = RepositoryPath("src", "RhythmIsland.Theme", "Styles.axaml");
+        var themePath = RepositoryPath("src", "RhythmIsland.Plugin", "Theming", "Background", "BackgroundBridgeStyles.axaml");
+        Assert.True(File.Exists(themePath), "插件必须自带背景桥接样式。");
         var source = File.ReadAllText(themePath);
         var root = XElement.Parse(source);
         Assert.Equal("Styles", root.Name.LocalName);
@@ -35,20 +37,14 @@ public sealed class ThemeBridgeTests
 
         var styles = root.Descendants().Where(element => element.Name.LocalName == "Style").ToArray();
         var outerStyle = styles.Single(element => (string?)element.Attribute("Selector") == "controls|MainWindowLine");
-        var mainLineStyle = styles.Single(element => (string?)element.Attribute("Selector") == "controls|MainWindowLine[IsMainLine=True]");
         var backgroundStyle = styles.Single(element => ((string?)element.Attribute("Selector"))?.Contains("PART_GridWrapper") == true);
         Assert.Equal("controls|MainWindowLine", (string?)outerStyle.Attribute("Selector"));
-        Assert.Contains(backgroundStyle, mainLineStyle.Descendants());
-        Assert.Equal("^ /template/ Grid#PART_GridWrapper", (string?)backgroundStyle.Attribute("Selector"));
+        Assert.Equal("controls|MainWindowLine[IsMainLine=True] /template/ Grid#PART_GridWrapper", (string?)backgroundStyle.Attribute("Selector"));
         Assert.Contains(outerStyle.Elements(), element =>
             (string?)element.Attribute("Property") == "Tag" &&
             (string?)element.Attribute("Value") == SpectrumThemeBridge.CurrentThemeMarker);
-        Assert.Contains(mainLineStyle.Elements(), element =>
-            (string?)element.Attribute("Property") == "ToolTip.Tip" &&
-            ((string?)element.Attribute("Value"))?.Contains("未检测到律动岛插件") == true);
-        Assert.Contains(mainLineStyle.Elements(), element =>
-            (string?)element.Attribute("Property") == "ToolTip.IsOpen" &&
-            (string?)element.Attribute("Value") == "True");
+        Assert.All(root.Descendants().Where(element => element.Name.LocalName == "Setter"),
+            setter => Assert.Equal("Tag", (string?)setter.Attribute("Property")));
         Assert.Contains(backgroundStyle.Descendants(), element =>
             (string?)element.Attribute("Property") == "Tag" &&
             (string?)element.Attribute("Value") == SpectrumThemeBridge.CurrentBridgeMarker);
@@ -59,7 +55,12 @@ public sealed class ThemeBridgeTests
     [AvaloniaFact]
     public void ThemeStylesLoadThroughAvaloniaRuntimeCompiler()
     {
-        var source = File.ReadAllText(RepositoryPath("src", "RhythmIsland.Theme", "Styles.axaml"));
+        using var stream = typeof(Plugin).Assembly.GetManifestResourceStream(
+            "RhythmIsland.Theming.Background.BackgroundBridgeStyles.axaml");
+        Assert.NotNull(stream);
+        using var reader = new StreamReader(stream);
+        var source = reader.ReadToEnd();
+        Assert.Equal(File.ReadAllText(RepositoryPath("src", "RhythmIsland.Plugin", "Theming", "Background", "BackgroundBridgeStyles.axaml")), source);
 
         var loaded = AvaloniaRuntimeXamlLoader.Load(
             source,
@@ -86,6 +87,174 @@ public sealed class ThemeBridgeTests
             (string?)element.Attribute("Header") == "背景频谱");
         var toggle = expander.Descendants().Single(element => element.Name.LocalName == "ToggleSwitch");
         Assert.Contains("Settings.BackgroundSpectrum.IsEnabled", (string?)toggle.Attribute("IsChecked"));
+    }
+
+    [AvaloniaFact]
+    public async Task LifecycleProvidesBackgroundWithoutStandaloneThemeAndSwitchPreservesLayer()
+    {
+        using var fixture = new HostFixture();
+        var lifecycle = new SpectrumThemeBridgeLifecycleService(fixture.Host,
+            new BackgroundBridgeStyleController(fixture.Host, NullLogger<BackgroundBridgeStyleController>.Instance));
+        SpectrumThemeBridge.Register();
+        var main = CreateLine(true, out var mainHosts);
+        var other = CreateLine(false, out var otherHosts);
+        var panel = new StackPanel();
+        panel.Children.Add(main);
+        panel.Children.Add(other);
+        var window = new Window { Content = panel };
+        await lifecycle.StartAsync(CancellationToken.None);
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal(SpectrumThemeBridge.CurrentThemeMarker, main.Tag);
+            Assert.Equal(SpectrumThemeBridge.CurrentThemeMarker, other.Tag);
+            var host = Assert.Single(mainHosts);
+            Assert.Equal(SpectrumThemeBridge.CurrentBridgeMarker, host.Tag);
+            Assert.Null(Assert.Single(otherHosts).Tag);
+            var layer = Assert.IsType<SpectrumBackgroundControl>(host.Children[0]);
+            var styleCount = Application.Current!.Styles.Count;
+            for (var index = 0; index < 3; index++)
+            {
+                fixture.Settings.BackgroundSpectrum.IsEnabled = false;
+                Assert.False(layer.IsVisible);
+                fixture.Settings.BackgroundSpectrum.IsEnabled = true;
+                Assert.True(layer.IsVisible);
+            }
+            Assert.Equal(styleCount, Application.Current.Styles.Count);
+            Assert.Same(layer, host.Children[0]);
+
+            main.Template = other.Template;
+            main.ApplyTemplate();
+            Dispatcher.UIThread.RunJobs();
+            Assert.False(fixture.Host.IsMounted(host));
+            Assert.Single(otherHosts.Last().Children.OfType<SpectrumBackgroundControl>());
+        }
+        finally
+        {
+            await lifecycle.StopAsync(CancellationToken.None);
+            window.Close();
+        }
+        Assert.All(mainHosts.Concat(otherHosts), host => Assert.Empty(host.Children.OfType<SpectrumBackgroundControl>()));
+        Assert.Equal(BackgroundThemeState.NotEnabled, fixture.Status.State);
+    }
+
+    private static ClassIsland.Controls.MainWindowLine CreateLine(bool isMainLine, out List<Grid> hosts)
+    {
+        var created = new List<Grid>();
+        hosts = created;
+        return new ClassIsland.Controls.MainWindowLine
+        {
+            IsMainLine = isMainLine,
+            Template = new FuncControlTemplate<ClassIsland.Controls.MainWindowLine>((_, scope) =>
+            {
+                var grid = new Grid { Name = "PART_GridWrapper", Height = 40 };
+                grid.Children.Add(new Border { Width = 180, Height = 40 });
+                scope.Register("PART_GridWrapper", grid);
+                created.Add(grid);
+                return grid;
+            })
+        };
+    }
+
+    [AvaloniaFact]
+    public async Task LateStartupAndRepeatedStyleApplicationMountAlreadyCreatedMainLine()
+    {
+        using var fixture = new HostFixture();
+        var controller = new BackgroundBridgeStyleController(fixture.Host,
+            NullLogger<BackgroundBridgeStyleController>.Instance);
+        var lifecycle = new SpectrumThemeBridgeLifecycleService(fixture.Host, controller);
+        SpectrumThemeBridge.Register();
+        var line = CreateLine(true, out var hosts);
+        var window = new Window { Content = line };
+        var originalStyles = Application.Current!.Styles.Count;
+        window.Show();
+        Dispatcher.UIThread.RunJobs();
+        Assert.Null(line.Tag);
+        await lifecycle.StartAsync(CancellationToken.None);
+        try
+        {
+            controller.Apply(Application.Current, reapply: true);
+            controller.Apply(Application.Current);
+            Dispatcher.UIThread.RunJobs();
+            var host = Assert.Single(hosts);
+            Assert.Equal(SpectrumThemeBridge.CurrentBridgeMarker, host.Tag);
+            Assert.Single(host.Children.OfType<SpectrumBackgroundControl>());
+            Assert.Equal(originalStyles + 1, Application.Current.Styles.Count);
+
+            line.IsMainLine = false;
+            Dispatcher.UIThread.RunJobs();
+            Assert.Empty(host.Children.OfType<SpectrumBackgroundControl>());
+            Assert.Equal(BackgroundThemeState.EnabledWaiting, fixture.Status.State);
+            line.IsMainLine = true;
+            Dispatcher.UIThread.RunJobs();
+            Assert.Single(host.Children.OfType<SpectrumBackgroundControl>());
+        }
+        finally
+        {
+            await lifecycle.StopAsync(CancellationToken.None);
+            await lifecycle.StopAsync(CancellationToken.None);
+            window.Close();
+        }
+        Assert.Equal(originalStyles, Application.Current.Styles.Count);
+    }
+
+    [AvaloniaFact]
+    public void StyleLoadingFailureReportsRecoverableStatusAndNoMainLineReportsWaiting()
+    {
+        using var fixture = new HostFixture();
+        var controller = new BackgroundBridgeStyleController(fixture.Host,
+            NullLogger<BackgroundBridgeStyleController>.Instance);
+        controller.Apply(null);
+        Assert.Equal(BackgroundThemeState.Incompatible, fixture.Status.State);
+        Assert.Contains("背景频谱暂时无法加载", fixture.Status.StatusText);
+        Assert.Contains("普通频谱组件仍可使用", fixture.Status.StatusText);
+        try
+        {
+            controller.Apply(Application.Current);
+            Assert.Equal(BackgroundThemeState.EnabledWaiting, fixture.Status.State);
+            Assert.Contains("主要行", fixture.Status.StatusText);
+            fixture.Settings.BackgroundSpectrum.IsEnabled = false;
+            Assert.Equal(BackgroundThemeState.DisabledByUser, fixture.Status.State);
+        }
+        finally
+        {
+            controller.Remove();
+        }
+        Assert.Equal(BackgroundThemeState.NotEnabled, fixture.Status.State);
+    }
+
+    [AvaloniaFact]
+    public async Task ExistingMainLineReattachesAfterLeavingAndReturningToLayout()
+    {
+        using var fixture = new HostFixture();
+        var lifecycle = new SpectrumThemeBridgeLifecycleService(fixture.Host,
+            new BackgroundBridgeStyleController(fixture.Host, NullLogger<BackgroundBridgeStyleController>.Instance));
+        SpectrumThemeBridge.Register();
+        var line = CreateLine(true, out var hosts);
+        var panel = new StackPanel();
+        panel.Children.Add(line);
+        var window = new Window { Content = panel };
+        await lifecycle.StartAsync(CancellationToken.None);
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+            var host = Assert.Single(hosts);
+            Assert.Single(host.Children.OfType<SpectrumBackgroundControl>());
+            panel.Children.Remove(line);
+            Dispatcher.UIThread.RunJobs();
+            Assert.Empty(host.Children.OfType<SpectrumBackgroundControl>());
+            panel.Children.Add(line);
+            Dispatcher.UIThread.RunJobs();
+            Assert.Single(host.Children.OfType<SpectrumBackgroundControl>());
+            Assert.Equal(BackgroundThemeState.Displaying, fixture.Status.State);
+        }
+        finally
+        {
+            await lifecycle.StopAsync(CancellationToken.None);
+            window.Close();
+        }
     }
 
     [AvaloniaFact]
@@ -147,6 +316,45 @@ public sealed class ThemeBridgeTests
         Assert.Equal(BackgroundThemeState.Displaying, fixture.Status.State);
         Assert.Contains("主题版本较旧", fixture.Status.StatusText);
         Assert.Contains("独立透明度", fixture.Status.StatusText);
+    }
+
+    [AvaloniaTheory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void CurrentBridgeSuppressesLegacyLayerRegardlessOfArrivalOrder(bool legacyFirst)
+    {
+        using var fixture = new HostFixture();
+        var legacy = new Border { Tag = SpectrumThemeBridge.LegacyBridgeMarker };
+        var current = new Grid { Tag = SpectrumThemeBridge.CurrentBridgeMarker };
+        if (legacyFirst) SpectrumThemeBridge.ApplyMarker(legacy, fixture.Host);
+        SpectrumThemeBridge.ApplyMarker(current, fixture.Host);
+        SpectrumThemeBridge.ApplyMarker(legacy, fixture.Host);
+
+        Assert.Null(legacy.Child);
+        Assert.False(fixture.Host.IsMounted(legacy));
+        Assert.Single(current.Children);
+        Assert.Equal(BackgroundThemeState.Displaying, fixture.Status.State);
+
+        current.Tag = null;
+        SpectrumThemeBridge.ApplyMarker(current, fixture.Host);
+        Assert.IsType<SpectrumBackgroundControl>(legacy.Child);
+        fixture.Host.Shutdown();
+        Assert.Null(legacy.Child);
+    }
+
+    [AvaloniaFact]
+    public void RemovedSuppressedLegacyMarkerCannotReturnAfterCurrentLayerLeaves()
+    {
+        using var fixture = new HostFixture();
+        var current = new Grid { Tag = SpectrumThemeBridge.CurrentBridgeMarker };
+        var legacy = new Border { Tag = SpectrumThemeBridge.LegacyBridgeMarker };
+        SpectrumThemeBridge.ApplyMarker(current, fixture.Host);
+        SpectrumThemeBridge.ApplyMarker(legacy, fixture.Host);
+        legacy.Tag = null;
+        SpectrumThemeBridge.ApplyMarker(legacy, fixture.Host);
+        fixture.Host.Detach(current);
+        Assert.Null(legacy.Child);
+        Assert.Equal(BackgroundThemeState.NotEnabled, fixture.Status.State);
     }
 
     [AvaloniaFact]
@@ -380,7 +588,7 @@ public sealed class ThemeBridgeTests
         SpectrumThemeBridge.ApplyMarker(line, fixture.Host);
 
         Assert.Equal(BackgroundThemeState.DisabledByUser, fixture.Status.State);
-        Assert.Equal("配套主题已启用，背景频谱已关闭。", fixture.Status.StatusText);
+        Assert.Contains("背景频谱已关闭", fixture.Status.StatusText);
     }
 
     [AvaloniaFact]
@@ -549,6 +757,7 @@ public sealed class ThemeBridgeTests
 
         public void Dispose()
         {
+            Host.Shutdown();
             _store.Dispose();
             if (Directory.Exists(_folder)) Directory.Delete(_folder, true);
         }

@@ -9,7 +9,7 @@ using RhythmIsland.Theming.Background;
 
 namespace RhythmIsland.Views.SettingsPages;
 
-[SettingsPageInfo("rhythmisland.settings", "律动岛", "\ueff7", "\ueff7")]
+[SettingsPageInfo("rhythmisland.settings", "律动频谱", "\ueff7", "\ueff7")]
 public partial class RhythmIslandSettingsPage : SettingsPageBase
 {
     public RhythmIslandSettingsPage()

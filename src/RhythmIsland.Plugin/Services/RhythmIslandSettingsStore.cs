@@ -19,7 +19,7 @@ public sealed class RhythmIslandSettingsStore : IDisposable
     private CancellationTokenSource? _scheduledSaveCancellation;
     private Task _scheduledSaveTask = Task.CompletedTask;
     private bool _hasPendingSave;
-    private bool _suppressAutomaticSave;
+    private int _validationThreadId;
     private bool _disposed;
 
     public RhythmIslandSettingsStore(string configFolder, ILogger<RhythmIslandSettingsStore> logger)
@@ -60,41 +60,47 @@ public sealed class RhythmIslandSettingsStore : IDisposable
         {
             try
             {
-                _suppressAutomaticSave = true;
-                Settings.Validate();
+                Volatile.Write(ref _validationThreadId, Environment.CurrentManagedThreadId);
+                try { Settings.Validate(); }
+                finally { Volatile.Write(ref _validationThreadId, 0); }
                 var snapshot = JsonSerializer.SerializeToUtf8Bytes(Settings, JsonOptions);
                 _fileWriter.Write(_settingsPath, snapshot);
             }
             catch (Exception exception)
             {
-                _logger.LogError(exception, "保存律动岛设置失败。");
+                _logger.LogError(exception, "保存律动频谱设置失败。");
                 TryDeleteTemporaryFile(_settingsPath + ".tmp");
                 throw;
-            }
-            finally
-            {
-                _suppressAutomaticSave = false;
             }
         }
     }
 
     private RhythmIslandSettings Load()
     {
-        if (!File.Exists(_settingsPath)) return new RhythmIslandSettings();
-
         try
         {
             using var stream = File.OpenRead(_settingsPath);
-            var loaded = JsonSerializer.Deserialize<RhythmIslandSettings>(stream, JsonOptions) ?? new RhythmIslandSettings();
+            using var document = JsonDocument.Parse(stream);
+            var loaded = document.RootElement.Deserialize<RhythmIslandSettings>(JsonOptions)
+                ?? new RhythmIslandSettings { IsEnabled = false };
+            // Only an absent settings file means a first installation. Existing settings
+            // without an explicit capture choice retain the previous disabled default.
+            if (document.RootElement.ValueKind != JsonValueKind.Object ||
+                !document.RootElement.TryGetProperty(nameof(RhythmIslandSettings.IsEnabled), out _))
+                loaded.IsEnabled = false;
             loaded.Validate();
             TryDeleteTemporaryFile(_settingsPath + ".tmp");
             return loaded;
         }
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+        {
+            return new RhythmIslandSettings();
+        }
         catch (Exception exception) when (exception is JsonException or IOException or UnauthorizedAccessException)
         {
-            _logger.LogWarning(exception, "律动岛设置已损坏或无法读取，将使用默认设置。");
+            _logger.LogWarning(exception, "律动频谱设置已损坏或无法读取，将使用默认设置。");
             TryDeleteTemporaryFile(_settingsPath + ".tmp");
-            return new RhythmIslandSettings();
+            return new RhythmIslandSettings { IsEnabled = false };
         }
     }
 
@@ -124,7 +130,9 @@ public sealed class RhythmIslandSettingsStore : IDisposable
 
     private void ScheduleSave()
     {
-        if (_disposed || _suppressAutomaticSave) return;
+        // Only validation's own synchronous notifications are suppressed. User edits on
+        // another thread or while serializing/writing must retain a pending save.
+        if (_disposed || Volatile.Read(ref _validationThreadId) == Environment.CurrentManagedThreadId) return;
         CancellationTokenSource cancellation;
         lock (_scheduleSync)
         {

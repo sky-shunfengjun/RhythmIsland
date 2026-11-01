@@ -12,7 +12,7 @@ public sealed class SettingsTests : IDisposable
     public void DefaultsMatchPlan()
     {
         var settings = new RhythmIslandSettings();
-        Assert.False(settings.IsEnabled);
+        Assert.True(settings.IsEnabled);
         Assert.Equal(1.0, settings.Sensitivity);
         Assert.Equal(0.65, settings.Smoothing);
         Assert.Equal(SpectrumVisualizationStyle.Bars, settings.BackgroundSpectrum.VisualizationStyle);
@@ -38,6 +38,38 @@ public sealed class SettingsTests : IDisposable
         };
         Assert.Equal(1, settings.Sensitivity);
         Assert.Equal(1, settings.Smoothing);
+    }
+
+    [Fact]
+    public void FirstInstallationEnablesCapture()
+    {
+        using var store = CreateStore();
+        Assert.True(store.Settings.IsEnabled);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void SavedCaptureChoiceSurvivesNewInstallationDefault(bool enabled)
+    {
+        using (var store = CreateStore())
+        {
+            store.Settings.IsEnabled = enabled;
+            store.Save();
+        }
+        using var reloaded = CreateStore();
+        Assert.Equal(enabled, reloaded.Settings.IsEnabled);
+    }
+
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("null")]
+    public void ExistingConfigurationWithoutCaptureChoiceRemainsDisabled(string json)
+    {
+        Directory.CreateDirectory(_folder);
+        File.WriteAllText(Path.Combine(_folder, "settings.json"), json);
+        using var store = CreateStore();
+        Assert.False(store.Settings.IsEnabled);
     }
 
     [Fact]

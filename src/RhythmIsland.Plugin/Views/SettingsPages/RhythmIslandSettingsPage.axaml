@@ -60,9 +60,9 @@
                                  Description="只在内存中实时计算；不保存、不上传，也不记录音频或完整频谱历史。" />
 
             <Separator Margin="0,20,0,8" />
-            <TextBlock Text="配套背景主题" FontSize="20" FontWeight="SemiBold" />
+            <TextBlock Text="主界面背景频谱" FontSize="20" FontWeight="SemiBold" />
             <TextBlock Margin="0,0,0,8" Opacity="0.72" TextWrapping="Wrap"
-                       Text="安装并在 Fluent 或 Classic 之后加载配套主题，即可在主要行背景显示同一套频谱。" />
+                       Text="打开声音捕获后，即可在主要行背景显示频谱；请先在主界面布局中设置一个主要行。" />
 
             <fa:SettingsExpander IconSource="{ci:FluentIconSource &#xEFF7;}"
                                  Header="背景频谱"
@@ -75,7 +75,7 @@
             </fa:SettingsExpander>
 
             <fa:SettingsExpander IconSource="{ci:FluentIconSource &#xE82F;}"
-                                 Header="主题状态"
+                                 Header="背景状态"
                                  Description="{Binding BackgroundThemeStatus.StatusText}" />
 
             <settingsControls:SpectrumAppearanceSettingsControl Settings="{Binding Settings.BackgroundSpectrum}" />
